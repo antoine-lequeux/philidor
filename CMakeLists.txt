@@ -12,6 +12,7 @@ target_sources(philidor PRIVATE
     src/main.cpp
     src/defines.hpp
     src/board.hpp
+    src/board.cpp
 )
 
 include(CheckIPOSupported)

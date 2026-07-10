@@ -23,6 +23,7 @@ inline constexpr Piece EMPTY = 0;
 
 enum class Type : u8
 {
+    EMPTY,
     PAWN,
     KNIGHT,
     BISHOP,
@@ -53,8 +54,9 @@ inline constexpr Color get_piece_color(Piece p) noexcept { return static_cast<Co
 
 inline constexpr char piece_to_char(Piece p) noexcept
 {
-    static constexpr char ASCII_PIECES[14] = {'P', 'N', 'B', 'R', 'Q', 'K', '.', '.', 'p', 'n', 'b', 'r', 'q', 'k'};
-    return p < 14 ? ASCII_PIECES[p] : '.';
+    static constexpr char ASCII_PIECES[15] = {'.', 'P', 'N', 'B', 'R', 'Q', 'K', '.',
+                                              '.', 'p', 'n', 'b', 'r', 'q', 'k'};
+    return p < 15 ? ASCII_PIECES[p] : '.';
 }
 
 using Square = u16;
