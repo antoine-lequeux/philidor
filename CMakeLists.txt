@@ -13,6 +13,7 @@ target_sources(philidor PRIVATE
     src/defines.hpp
     src/board.hpp
     src/board.cpp
+    src/movelist.hpp
 )
 
 include(CheckIPOSupported)

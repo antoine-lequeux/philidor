@@ -19,8 +19,8 @@ class Board
 {
 public:
 
-    void make_move(Move mv);
-    void unmake_move(Move mv);
+    void make_move(Move mv) noexcept;
+    void unmake_move(Move mv) noexcept;
 
     static Board from_startpos();
     static std::expected<Board, std::string> from_fen(std::string fen);

@@ -23,10 +23,11 @@ static constexpr std::array<CastlingRights, 64> CASTLING_UPDATE = []
 void Board::put_piece(Piece p, Square sq) noexcept
 {
     pieces[sq] = p;
-    const u64 bit = 1 << sq;
+    const u64 bit = 1ULL << sq;
     const Type pt = get_piece_type(p);
+    [[assume(static_cast<u8>(pt) >= 1 && static_cast<u8>(pt) <= 6)]];
     const u8 color_index = static_cast<u8>(get_piece_color(p));
-    const u8 bb_index = static_cast<u8>(pt) + color_index * 6;
+    const u8 bb_index = (static_cast<u8>(pt) - 1) + color_index * 6;
 
     piece_bb[bb_index] |= bit;
     color_bb[color_index] |= bit;
@@ -40,10 +41,11 @@ void Board::put_piece(Piece p, Square sq) noexcept
 void Board::remove_piece(Piece p, Square sq) noexcept
 {
     pieces[sq] = EMPTY;
-    const u64 bit = ~(1 << sq);
+    const u64 bit = ~(1ULL << sq);
     const Type pt = get_piece_type(p);
+    [[assume(static_cast<u8>(pt) >= 1 && static_cast<u8>(pt) <= 6)]];
     const u8 color_index = static_cast<u8>(get_piece_color(p));
-    const u8 bb_index = static_cast<u8>(pt) + color_index * 6;
+    const u8 bb_index = (static_cast<u8>(pt) - 1) + color_index * 6;
 
     piece_bb[bb_index] &= bit;
     color_bb[color_index] &= bit;
@@ -60,10 +62,11 @@ void Board::move_piece(Piece p, Square from, Square to) noexcept
     pieces[to] = p;
 
     const Type pt = get_piece_type(p);
+    [[assume(static_cast<u8>(pt) >= 1 && static_cast<u8>(pt) <= 6)]];
     const u8 color_index = static_cast<u8>(get_piece_color(p));
 
-    const u64 move_mask = (1 << from) | (1 << to);
-    const u8 bb_index = static_cast<u8>(pt) + color_index * 6;
+    const u64 move_mask = (1ULL << from) | (1ULL << to);
+    const u8 bb_index = (static_cast<u8>(pt) - 1) + color_index * 6;
 
     piece_bb[bb_index] ^= move_mask;
     color_bb[color_index] ^= move_mask;
@@ -74,13 +77,18 @@ void Board::move_piece(Piece p, Square from, Square to) noexcept
     occupancy ^= move_mask;
 }
 
-void Board::make_move(Move mv)
+void Board::make_move(Move mv) noexcept
 {
+    [[assume(ply < 511)]];
+
     const Square from = mv.get_start_square();
     const Square to = mv.get_target_square();
     const u16 flag = mv.get_flag();
 
     const Piece moved = pieces[from];
+
+    [[assume(moved != EMPTY)]];
+
     const Type moved_type = get_piece_type(moved);
     const Color us = side_to_move;
 
@@ -154,8 +162,10 @@ void Board::make_move(Move mv)
     ply++;
 }
 
-void Board::unmake_move(Move mv)
+void Board::unmake_move(Move mv) noexcept
 {
+    [[assume(ply > 0)]];
+
     ply--;
     side_to_move = !side_to_move;
 
