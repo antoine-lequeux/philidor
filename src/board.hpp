@@ -19,7 +19,7 @@ class Board
     std::array<Bitboard, 12> piece_bb;
     std::array<Bitboard, 2> color_bb;
     Bitboard occupancy;
-    bool white_to_move;
+    Color side_to_move;
     usize ply;
     std::array<State, 512> history;
 };

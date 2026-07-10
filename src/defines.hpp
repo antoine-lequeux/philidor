@@ -19,41 +19,42 @@ using f32 = float;
 
 using Piece = u8;
 
+inline constexpr Piece EMPTY = 0;
+
 enum class Type : u8
 {
-    EMPTY = 0,
-    PAWN = 1,
-    KNIGHT = 2,
-    BISHOP = 3,
-    ROOK = 4,
-    QUEEN = 5,
-    KING = 6
+    PAWN,
+    KNIGHT,
+    BISHOP,
+    ROOK,
+    QUEEN,
+    KING
 };
 
 enum class Color : u8
 {
-    WHITE = 8,
-    BLACK = 16
+    WHITE,
+    BLACK
 };
 
-// Bitmasks
-inline constexpr u8 PIECE_TYPE_MASK = 0b00111;
-inline constexpr u8 PIECE_COLOR_MASK = 0b11000;
+inline constexpr Color operator!(Color c) noexcept { return static_cast<Color>(static_cast<u8>(c) ^ 1); }
+
+inline constexpr u8 PIECE_TYPE_MASK = 0b0111;
+inline constexpr u8 PIECE_COLOR_MASK = 0b1000;
 
 inline constexpr Piece make_piece(Type type, Color color) noexcept
 {
-    return static_cast<Piece>(static_cast<u8>(type) | static_cast<u8>(color));
+    return static_cast<Piece>(static_cast<u8>(type) | (static_cast<u8>(color) << 3));
 }
 
 inline constexpr Type get_piece_type(Piece p) noexcept { return static_cast<Type>(p & PIECE_TYPE_MASK); }
 
-inline constexpr Color get_piece_color(Piece p) noexcept { return static_cast<Color>(p & PIECE_COLOR_MASK); }
+inline constexpr Color get_piece_color(Piece p) noexcept { return static_cast<Color>((p & PIECE_COLOR_MASK) >> 3); }
 
 inline constexpr char piece_to_char(Piece p) noexcept
 {
-    static constexpr char ASCII_PIECES[23] = {'.', '.', '.', '.', '.', '.', '.', '.', '.', 'P', 'N', 'B',
-                                              'R', 'Q', 'K', '.', '.', 'p', 'n', 'b', 'r', 'q', 'k'};
-    return p < 23 ? ASCII_PIECES[p] : '.';
+    static constexpr char ASCII_PIECES[14] = {'P', 'N', 'B', 'R', 'Q', 'K', '.', '.', 'p', 'n', 'b', 'r', 'q', 'k'};
+    return p < 14 ? ASCII_PIECES[p] : '.';
 }
 
 using Square = u16;
@@ -106,7 +107,7 @@ struct Move
             case PROMOTE_TO_BISHOP_FLAG:
                 return Type::BISHOP;
             default:
-                return Type::EMPTY;
+                return Type::QUEEN;
         }
     }
 
