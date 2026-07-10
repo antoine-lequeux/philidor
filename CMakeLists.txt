@@ -14,6 +14,8 @@ target_sources(philidor PRIVATE
     src/board.hpp
     src/board.cpp
     src/movelist.hpp
+    src/magic.hpp
+    src/magic.cpp
 )
 
 include(CheckIPOSupported)
