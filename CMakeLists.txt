@@ -9,7 +9,9 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_executable(philidor)
 
 target_sources(philidor PRIVATE
-    main.cpp
+    src/main.cpp
+    src/defines.hpp
+    src/board.hpp
 )
 
 include(CheckIPOSupported)
