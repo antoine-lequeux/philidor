@@ -6,174 +6,162 @@
 
 namespace priv
 {
-constexpr std::array<Bitboard, 64> build_knight_attacks() noexcept
+constexpr std::array<Bitboard, 64> build_knight_attacks()
 {
-    std::array<Bitboard, 64> attacks{};
-    constexpr int dr[] = {2, 2, -2, -2, 1, 1, -1, -1};
-    constexpr int df[] = {1, -1, 1, -1, 2, -2, 2, -2};
+    std::array<Bitboard, 64> attacks {};
+    constexpr i32 dr[] = {2, 2, -2, -2, 1, 1, -1, -1};
+    constexpr i32 df[] = {1, -1, 1, -1, 2, -2, 2, -2};
 
-    for (int sq = 0; sq < 64; ++sq)
+    for (u32 sq = 0; sq < 64; ++sq)
     {
-        int r = sq / 8;
-        int f = sq % 8;
-        for (int i = 0; i < 8; ++i)
+        i32 r = static_cast<i32>(sq / 8);
+        i32 f = static_cast<i32>(sq % 8);
+        for (u32 i = 0; i < 8; ++i)
         {
-            int rr = r + dr[i];
-            int ff = f + df[i];
-            if (rr >= 0 && rr < 8 && ff >= 0 && ff < 8)
-                attacks[sq] |= (1ULL << (rr * 8 + ff));
+            i32 rr = r + dr[i];
+            i32 ff = f + df[i];
+            if (rr >= 0 && rr < 8 && ff >= 0 && ff < 8) attacks[sq] |= (1ULL << static_cast<u32>(rr * 8 + ff));
         }
     }
     return attacks;
 }
 
-constexpr std::array<Bitboard, 64> build_king_attacks() noexcept
+constexpr std::array<Bitboard, 64> build_king_attacks()
 {
-    std::array<Bitboard, 64> attacks{};
-    for (int sq = 0; sq < 64; ++sq)
+    std::array<Bitboard, 64> attacks {};
+    for (u32 sq = 0; sq < 64; ++sq)
     {
-        int r = sq / 8;
-        int f = sq % 8;
-        for (int dr = -1; dr <= 1; ++dr)
+        i32 r = static_cast<i32>(sq / 8);
+        i32 f = static_cast<i32>(sq % 8);
+        for (i32 dr = -1; dr <= 1; ++dr)
         {
-            for (int df = -1; df <= 1; ++df)
+            for (i32 df = -1; df <= 1; ++df)
             {
-                if (dr == 0 && df == 0)
-                    continue;
+                if (dr == 0 && df == 0) continue;
 
-                int rr = r + dr;
-                int ff = f + df;
-                if (rr >= 0 && rr < 8 && ff >= 0 && ff < 8)
-                    attacks[sq] |= (1ULL << (rr * 8 + ff));
+                i32 rr = r + dr;
+                i32 ff = f + df;
+                if (rr >= 0 && rr < 8 && ff >= 0 && ff < 8) attacks[sq] |= (1ULL << static_cast<u32>(rr * 8 + ff));
             }
         }
     }
     return attacks;
 }
 
-constexpr std::array<std::array<Bitboard, 64>, 2> build_pawn_attacks() noexcept
+constexpr std::array<std::array<Bitboard, 64>, 2> build_pawn_attacks()
 {
-    std::array<std::array<Bitboard, 64>, 2> attacks{};
-    for (int sq = 0; sq < 64; ++sq)
+    std::array<std::array<Bitboard, 64>, 2> attacks {};
+    for (u32 sq = 0; sq < 64; ++sq)
     {
-        int r = sq / 8;
-        int f = sq % 8;
+        u32 r = sq / 8;
+        u32 f = sq % 8;
 
         if (r < 7)
         {
-            if (f > 0)
-                attacks[0][sq] |= (1ULL << (sq + 7));
-            if (f < 7)
-                attacks[0][sq] |= (1ULL << (sq + 9));
+            if (f > 0) attacks[0][sq] |= (1ULL << (sq + 7));
+            if (f < 7) attacks[0][sq] |= (1ULL << (sq + 9));
         }
         if (r > 0)
         {
-            if (f > 0)
-                attacks[1][sq] |= (1ULL << (sq - 9));
-            if (f < 7)
-                attacks[1][sq] |= (1ULL << (sq - 7));
+            if (f > 0) attacks[1][sq] |= (1ULL << (sq - 9));
+            if (f < 7) attacks[1][sq] |= (1ULL << (sq - 7));
         }
     }
     return attacks;
 }
 
-constexpr std::array<std::array<Bitboard, 64>, 64> build_between() noexcept
+constexpr std::array<std::array<Bitboard, 64>, 64> build_between()
 {
-    std::array<std::array<Bitboard, 64>, 64> table{};
-    for (int from = 0; from < 64; ++from)
+    std::array<std::array<Bitboard, 64>, 64> table {};
+    for (u32 from = 0; from < 64; ++from)
     {
-        for (int to = 0; to < 64; ++to)
+        for (u32 to = 0; to < 64; ++to)
         {
-            if (from == to)
-                continue;
+            if (from == to) continue;
 
-            int fr = from / 8, ff = from % 8;
-            int tr = to / 8, tf = to % 8;
+            i32 fr = static_cast<i32>(from / 8), ff = static_cast<i32>(from % 8);
+            i32 tr = static_cast<i32>(to / 8), tf = static_cast<i32>(to % 8);
 
-            int dr = (tr > fr) - (tr < fr);
-            int df = (tf > ff) - (tf < ff);
+            i32 dr = (tr > fr) - (tr < fr);
+            i32 df = (tf > ff) - (tf < ff);
 
-            int abs_r = (tr >= fr) ? (tr - fr) : (fr - tr);
-            int abs_f = (tf >= ff) ? (tf - ff) : (ff - tf);
+            i32 abs_r = (tr >= fr) ? (tr - fr) : (fr - tr);
+            i32 abs_f = (tf >= ff) ? (tf - ff) : (ff - tf);
+
+            if (dr == 0 || df == 0 || abs_r == abs_f)
+                for (i32 r = fr + dr, f = ff + df; r != tr || f != tf; r += dr, f += df)
+                    table[from][to] |= (1ULL << static_cast<u32>(r * 8 + f));
+        }
+    }
+    return table;
+}
+
+constexpr std::array<std::array<Bitboard, 64>, 64> build_line()
+{
+    std::array<std::array<Bitboard, 64>, 64> table {};
+    for (u32 from = 0; from < 64; ++from)
+    {
+        for (u32 to = 0; to < 64; ++to)
+        {
+            if (from == to) continue;
+
+            i32 fr = static_cast<i32>(from / 8), ff = static_cast<i32>(from % 8);
+            i32 tr = static_cast<i32>(to / 8), tf = static_cast<i32>(to % 8);
+
+            i32 dr = (tr > fr) - (tr < fr);
+            i32 df = (tf > ff) - (tf < ff);
+
+            i32 abs_r = (tr >= fr) ? (tr - fr) : (fr - tr);
+            i32 abs_f = (tf >= ff) ? (tf - ff) : (ff - tf);
 
             if (dr == 0 || df == 0 || abs_r == abs_f)
             {
-                for (int r = fr + dr, f = ff + df; r != tr || f != tf; r += dr, f += df)
-                    table[from][to] |= (1ULL << (r * 8 + f));
+                for (i32 r = fr, f = ff; r >= 0 && r < 8 && f >= 0 && f < 8; r += dr, f += df)
+                    table[from][to] |= (1ULL << static_cast<u32>(r * 8 + f));
+
+                for (i32 r = fr - dr, f = ff - df; r >= 0 && r < 8 && f >= 0 && f < 8; r -= dr, f -= df)
+                    table[from][to] |= (1ULL << static_cast<u32>(r * 8 + f));
             }
         }
     }
     return table;
 }
 
-constexpr std::array<std::array<Bitboard, 64>, 64> build_line() noexcept
-{
-    std::array<std::array<Bitboard, 64>, 64> table{};
-    for (int from = 0; from < 64; ++from)
-    {
-        for (int to = 0; to < 64; ++to)
-        {
-            if (from == to)
-                continue;
-
-            int fr = from / 8, ff = from % 8;
-            int tr = to / 8, tf = to % 8;
-
-            int dr = (tr > fr) - (tr < fr);
-            int df = (tf > ff) - (tf < ff);
-
-            int abs_r = (tr >= fr) ? (tr - fr) : (fr - tr);
-            int abs_f = (tf >= ff) ? (tf - ff) : (ff - tf);
-
-            if (dr == 0 || df == 0 || abs_r == abs_f)
-            {
-                for (int r = fr, f = ff; r >= 0 && r < 8 && f >= 0 && f < 8; r += dr, f += df)
-                    table[from][to] |= (1ULL << (r * 8 + f));
-
-                for (int r = fr - dr, f = ff - df; r >= 0 && r < 8 && f >= 0 && f < 8; r -= dr, f -= df)
-                    table[from][to] |= (1ULL << (r * 8 + f));
-            }
-        }
-    }
-    return table;
-}
-
-inline constexpr auto KNIGHT_ATTACKS = build_knight_attacks();
-inline constexpr auto KING_ATTACKS = build_king_attacks();
-inline constexpr auto PAWN_ATTACKS = build_pawn_attacks();
-inline constexpr auto BETWEEN = build_between();
-inline constexpr auto LINE = build_line();
+constexpr auto KNIGHT_ATTACKS = build_knight_attacks();
+constexpr auto KING_ATTACKS = build_king_attacks();
+constexpr auto PAWN_ATTACKS = build_pawn_attacks();
+constexpr auto BETWEEN = build_between();
+constexpr auto LINE = build_line();
 } // namespace priv
 
-constexpr Bitboard knight_attacks(Square sq) noexcept
+constexpr Bitboard knight_attacks(Square sq)
 {
     [[assume(sq < 64)]];
     return priv::KNIGHT_ATTACKS[sq];
 }
 
-constexpr Bitboard king_attacks(Square sq) noexcept
+constexpr Bitboard king_attacks(Square sq)
 {
     [[assume(sq < 64)]];
     return priv::KING_ATTACKS[sq];
 }
 
 // Squares attacked by a pawn of this color on 'sq'.
-constexpr Bitboard pawn_attacks(Square sq, Color color) noexcept
+constexpr Bitboard pawn_attacks(Square sq, Color color)
 {
     [[assume(sq < 64)]];
-    [[assume(static_cast<u8>(color) < 2)]];
-    return priv::PAWN_ATTACKS[static_cast<size_t>(color)][sq];
+    return priv::PAWN_ATTACKS[color_index(color)][sq];
 }
 
 // Squares strictly between two aligned squares.
-constexpr Bitboard squares_between(Square from, Square to) noexcept
+constexpr Bitboard squares_between(Square from, Square to)
 {
     [[assume(from < 64 && to < 64)]];
     return priv::BETWEEN[from][to];
 }
 
 // All squares on the line through two aligned squares, including those squares.
-constexpr Bitboard line_through(Square from, Square to) noexcept
+constexpr Bitboard line_through(Square from, Square to)
 {
     [[assume(from < 64 && to < 64)]];
     return priv::LINE[from][to];

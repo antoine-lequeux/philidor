@@ -2,7 +2,6 @@
 
 #include <bit>
 #include <cstdint>
-#include <format>
 #include <string>
 
 using i8 = int8_t;
@@ -17,10 +16,11 @@ using u64 = uint64_t;
 using usize = size_t;
 
 using f32 = float;
+using f64 = double;
 
-using Piece = u8;
+using Piece = u32;
 
-inline constexpr Piece EMPTY = 0;
+constexpr Piece EMPTY = 0;
 
 enum class Type : u8
 {
@@ -39,29 +39,73 @@ enum class Color : u8
     BLACK
 };
 
-inline constexpr Color operator!(Color c) noexcept { return static_cast<Color>(static_cast<u8>(c) ^ 1); }
-
-inline constexpr u8 PIECE_TYPE_MASK = 0b0111;
-inline constexpr u8 PIECE_COLOR_MASK = 0b1000;
-
-inline constexpr Piece make_piece(Type type, Color color) noexcept
+constexpr Color operator!(Color c)
 {
-    return static_cast<Piece>(static_cast<u8>(type) | (static_cast<u8>(color) << 3));
+    return static_cast<Color>(static_cast<u8>(c) ^ 1);
 }
 
-inline constexpr Type get_piece_type(Piece p) noexcept { return static_cast<Type>(p & PIECE_TYPE_MASK); }
+constexpr usize color_index(Color c)
+{
+    return static_cast<usize>(c);
+}
+constexpr usize type_index(Type t)
+{
+    return static_cast<usize>(t);
+}
+constexpr usize piece_type_index(Type t)
+{
+    return static_cast<usize>(t) - 1;
+}
 
-inline constexpr Color get_piece_color(Piece p) noexcept { return static_cast<Color>((p & PIECE_COLOR_MASK) >> 3); }
+constexpr u32 PIECE_TYPE_MASK = 0b0111;
+constexpr u32 PIECE_COLOR_MASK = 0b1000;
 
-inline constexpr char piece_to_char(Piece p) noexcept
+constexpr Piece make_piece(Type type, Color color)
+{
+    return static_cast<u32>(type) | (static_cast<u32>(color) << 3);
+}
+
+constexpr Type get_piece_type(Piece p)
+{
+    return static_cast<Type>(p & PIECE_TYPE_MASK);
+}
+
+constexpr Color get_piece_color(Piece p)
+{
+    return static_cast<Color>((p & PIECE_COLOR_MASK) >> 3);
+}
+
+constexpr char piece_to_char(Piece p)
 {
     static constexpr char ASCII_PIECES[15] = {'.', 'P', 'N', 'B', 'R', 'Q', 'K', '.',
                                               '.', 'p', 'n', 'b', 'r', 'q', 'k'};
     return p < 15 ? ASCII_PIECES[p] : '.';
 }
 
-using Square = u16;
-inline constexpr Square NO_SQUARE = 64;
+constexpr usize bb_index(usize type_idx, usize color_idx)
+{
+    [[assume(type_idx >= 1 && type_idx <= 6)]];
+    [[assume(color_idx < 2)]];
+    return (type_idx - 1) + 6 * color_idx;
+}
+
+constexpr usize bb_index(Type type, Color color)
+{
+    return bb_index(type_index(type), color_index(color));
+}
+
+constexpr usize bb_index(Type type, usize color_idx)
+{
+    return bb_index(type_index(type), color_idx);
+}
+
+constexpr usize bb_index(usize type_idx, Color color)
+{
+    return bb_index(type_idx, color_index(color));
+}
+
+using Square = u32;
+constexpr Square NO_SQUARE = 64;
 
 struct Move
 {
@@ -77,58 +121,52 @@ struct Move
 
     static constexpr u16 START_SQUARE_MASK = 0b0000000000111111;
     static constexpr u16 TARGET_SQUARE_MASK = 0b0000111111000000;
-    static constexpr u16 FROM_TO_MASK = 0b1111000000000000;
+    static constexpr u16 FROM_TO_MASK = 0b0000111111111111;
 
-    constexpr Move() noexcept : bits(0) {}
-    explicit constexpr Move(u16 b) noexcept : bits(b) {}
+    constexpr Move() : bits(0) {}
+    explicit constexpr Move(u16 b) : bits(b) {}
 
-    static constexpr Move make(Square start, Square target) noexcept { return Move(start | (target << 6)); }
+    static constexpr Move make(Square start, Square target) { return Move(static_cast<u16>(start | (target << 6))); }
 
-    static constexpr Move make(Square start, Square target, u16 flag) noexcept
+    static constexpr Move make(Square start, Square target, u16 flag)
     {
-        return Move(start | (target << 6) | (flag << 12));
+        return Move(static_cast<u16>(start | (target << 6) | (static_cast<u32>(flag) << 12)));
     }
 
-    constexpr u16 get_start_square() const noexcept { return bits & START_SQUARE_MASK; }
+    constexpr Square get_start_square() const { return bits & START_SQUARE_MASK; }
 
-    constexpr u16 get_target_square() const noexcept { return (bits & TARGET_SQUARE_MASK) >> 6; }
+    constexpr Square get_target_square() const { return (bits & TARGET_SQUARE_MASK) >> 6; }
 
-    constexpr u16 get_flag() const noexcept { return bits >> 12; }
+    constexpr u16 get_flag() const { return bits >> 12; }
 
-    constexpr bool is_promotion() const noexcept { return get_flag() >= PROMOTE_TO_QUEEN_FLAG; }
+    constexpr bool is_promotion() const { return get_flag() >= PROMOTE_TO_QUEEN_FLAG; }
 
-    constexpr Type get_promotion_type() const noexcept
+    constexpr Type get_promotion_type() const
     {
         switch (get_flag())
         {
-            case PROMOTE_TO_QUEEN_FLAG:
-                return Type::QUEEN;
-            case PROMOTE_TO_KNIGHT_FLAG:
-                return Type::KNIGHT;
-            case PROMOTE_TO_ROOK_FLAG:
-                return Type::ROOK;
-            case PROMOTE_TO_BISHOP_FLAG:
-                return Type::BISHOP;
-            default:
-                return Type::EMPTY;
+            case PROMOTE_TO_QUEEN_FLAG: return Type::QUEEN;
+            case PROMOTE_TO_KNIGHT_FLAG: return Type::KNIGHT;
+            case PROMOTE_TO_ROOK_FLAG: return Type::ROOK;
+            case PROMOTE_TO_BISHOP_FLAG: return Type::BISHOP;
+            default: return Type::EMPTY;
         }
     }
 
-    constexpr usize from_to_index() const noexcept { return static_cast<usize>(bits & FROM_TO_MASK); }
+    constexpr usize from_to_index() const { return bits & FROM_TO_MASK; }
 
-    constexpr void reset() noexcept { bits = 0; }
+    constexpr void reset() { bits = 0; }
 
-    constexpr bool is_some() const noexcept { return bits > 0; }
-    constexpr bool is_null() const noexcept { return bits == 0; }
+    constexpr bool is_some() const { return bits > 0; }
+    constexpr bool is_null() const { return bits == 0; }
 
-    constexpr bool operator==(const Move& other) const noexcept = default;
+    constexpr bool operator==(const Move& other) const = default;
 
     std::string to_uci() const
     {
-        auto idx_to_coord = [](Square idx) -> std::string
-        {
-            char file = 'a' + (idx % 8);
-            char rank = '1' + (idx / 8);
+        auto idx_to_coord = [](Square idx) -> std::string {
+            char file = static_cast<char>('a' + (idx % 8));
+            char rank = static_cast<char>('1' + (idx / 8));
             return {file, rank};
         };
 
@@ -136,20 +174,11 @@ struct Move
 
         switch (get_promotion_type())
         {
-            case Type::BISHOP:
-                uci += 'b';
-                break;
-            case Type::ROOK:
-                uci += 'r';
-                break;
-            case Type::KNIGHT:
-                uci += 'n';
-                break;
-            case Type::QUEEN:
-                uci += 'q';
-                break;
-            default:
-                break;
+            case Type::BISHOP: uci += 'b'; break;
+            case Type::ROOK: uci += 'r'; break;
+            case Type::KNIGHT: uci += 'n'; break;
+            case Type::QUEEN: uci += 'q'; break;
+            default: break;
         }
         return uci;
     }
@@ -167,28 +196,28 @@ enum class CastlingRights : u8
     ALL = WK | WQ | BK | BQ
 };
 
-inline constexpr CastlingRights operator|(CastlingRights lhs, CastlingRights rhs) noexcept
+constexpr CastlingRights operator|(CastlingRights lhs, CastlingRights rhs)
 {
     return static_cast<CastlingRights>(static_cast<u8>(lhs) | static_cast<u8>(rhs));
 }
 
-inline constexpr CastlingRights operator&(CastlingRights lhs, CastlingRights rhs) noexcept
+constexpr CastlingRights operator&(CastlingRights lhs, CastlingRights rhs)
 {
     return static_cast<CastlingRights>(static_cast<u8>(lhs) & static_cast<u8>(rhs));
 }
 
-inline constexpr CastlingRights operator~(CastlingRights cr) noexcept
+constexpr CastlingRights operator~(CastlingRights cr)
 {
     return static_cast<CastlingRights>(~static_cast<u8>(cr));
 }
 
-inline constexpr CastlingRights& operator&=(CastlingRights& lhs, CastlingRights rhs) noexcept
+constexpr CastlingRights& operator&=(CastlingRights& lhs, CastlingRights rhs)
 {
     lhs = lhs & rhs;
     return lhs;
 }
 
-inline constexpr CastlingRights& operator|=(CastlingRights& lhs, CastlingRights rhs) noexcept
+constexpr CastlingRights& operator|=(CastlingRights& lhs, CastlingRights rhs)
 {
     lhs = lhs | rhs;
     return lhs;
@@ -199,34 +228,34 @@ using Bitboard = u64;
 struct Bitloop
 {
     Bitboard bb;
-    constexpr explicit Bitloop(Bitboard b) noexcept : bb(b) {}
+    constexpr explicit Bitloop(Bitboard b) : bb(b) {}
 
     struct Iterator
     {
         Bitboard bb;
-        constexpr bool operator!=(const Iterator& other) const noexcept { return bb != other.bb; }
-        constexpr Iterator& operator++() noexcept
+        constexpr bool operator!=(const Iterator& other) const { return bb != other.bb; }
+        constexpr Iterator& operator++()
         {
             bb &= bb - 1;
             return *this;
         }
-        constexpr Square operator*() const noexcept { return static_cast<Square>(std::countr_zero(bb)); }
+        constexpr Square operator*() const { return static_cast<Square>(std::countr_zero(bb)); }
     };
 
-    constexpr Iterator begin() const noexcept { return {bb}; }
-    constexpr Iterator end() const noexcept { return {0}; }
+    constexpr Iterator begin() const { return {bb}; }
+    constexpr Iterator end() const { return {0}; }
 };
 
-inline constexpr Bitboard FILE_A = 0x0101010101010101ULL;
-inline constexpr Bitboard FILE_H = 0x8080808080808080ULL;
+constexpr Bitboard FILE_A = 0x0101010101010101ULL;
+constexpr Bitboard FILE_H = 0x8080808080808080ULL;
 
-inline constexpr Bitboard RANK_1 = 0x00000000000000FFULL;
-inline constexpr Bitboard RANK_3 = 0x0000000000FF0000ULL;
-inline constexpr Bitboard RANK_6 = 0x0000FF0000000000ULL;
-inline constexpr Bitboard RANK_8 = 0xFF00000000000000ULL;
+constexpr Bitboard RANK_1 = 0x00000000000000FFULL;
+constexpr Bitboard RANK_3 = 0x0000000000FF0000ULL;
+constexpr Bitboard RANK_6 = 0x0000FF0000000000ULL;
+constexpr Bitboard RANK_8 = 0xFF00000000000000ULL;
 
-inline constexpr Bitboard WHITE_OO_BLOCKERS = 0x60ULL;  // f1, g1
-inline constexpr Bitboard WHITE_OOO_BLOCKERS = 0x0EULL; // b1, c1, d1
+constexpr Bitboard WHITE_OO_BLOCKERS = 0x60ULL;  // f1, g1
+constexpr Bitboard WHITE_OOO_BLOCKERS = 0x0EULL; // b1, c1, d1
 
-inline constexpr Bitboard BLACK_OO_BLOCKERS = 0x6000000000000000ULL;  // f8, g8
-inline constexpr Bitboard BLACK_OOO_BLOCKERS = 0x0E00000000000000ULL; // b8, c8, d8
+constexpr Bitboard BLACK_OO_BLOCKERS = 0x6000000000000000ULL;  // f8, g8
+constexpr Bitboard BLACK_OOO_BLOCKERS = 0x0E00000000000000ULL; // b8, c8, d8

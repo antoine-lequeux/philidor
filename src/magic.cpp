@@ -1,8 +1,5 @@
 #include "magic.hpp"
 
-#include <array>
-#include <iostream>
-
 Magic ROOK_MAGICS[64] = {};
 Magic BISHOP_MAGICS[64] = {};
 
@@ -13,6 +10,8 @@ constexpr usize BISHOP_TABLE_SIZE = 0x1480;
 
 u64 ROOK_TABLE[ROOK_TABLE_SIZE];
 u64 BISHOP_TABLE[BISHOP_TABLE_SIZE];
+
+// clang-format off
 
 constexpr u64 ROOK_MAGIC_NUMBERS[64] = {
     0x0080001020400080, 0x0040001000200040, 0x0080081000200080, 0x0080040800100080, 0x0080020400080080,
@@ -44,123 +43,110 @@ constexpr u64 BISHOP_MAGIC_NUMBERS[64] = {
     0x0002020202020000, 0x0000104104104000, 0x0000002082082000, 0x0000000020841000, 0x0000000000208800,
     0x0000000010020200, 0x0000000404080200, 0x0000040404040400, 0x0002020202020200};
 
-constexpr u32 ROOK_BITS[64] = {12, 11, 11, 11, 11, 11, 11, 12, 11, 10, 10, 10, 10, 10, 10, 11, 11, 10, 10, 10, 10, 10,
-                               10, 11, 11, 10, 10, 10, 10, 10, 10, 11, 11, 10, 10, 10, 10, 10, 10, 11, 11, 10, 10, 10,
-                               10, 10, 10, 11, 11, 10, 10, 10, 10, 10, 10, 11, 12, 11, 11, 11, 11, 11, 11, 12};
+constexpr u32 ROOK_BITS[64] = {
+    12, 11, 11, 11, 11, 11, 11, 12, 11, 10, 10, 10, 10, 10, 10, 11, 11, 10, 10, 10, 10, 10,
+    10, 11, 11, 10, 10, 10, 10, 10, 10, 11, 11, 10, 10, 10, 10, 10, 10, 11, 11, 10, 10, 10,
+    10, 10, 10, 11, 11, 10, 10, 10, 10, 10, 10, 11, 12, 11, 11, 11, 11, 11, 11, 12};
 
-constexpr u32 BISHOP_BITS[64] = {6, 5, 5, 5, 5, 5, 5, 6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 7, 7, 7, 7,
-                                 5, 5, 5, 5, 7, 9, 9, 7, 5, 5, 5, 5, 7, 9, 9, 7, 5, 5, 5, 5, 7, 7,
-                                 7, 7, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 5, 5, 5, 5, 5, 5, 6};
+constexpr u32 BISHOP_BITS[64] = {
+    6, 5, 5, 5, 5, 5, 5, 6, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 7, 7, 7, 7,
+    5, 5, 5, 5, 7, 9, 9, 7, 5, 5, 5, 5, 7, 9, 9, 7, 5, 5, 5, 5, 7, 7,
+    7, 7, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 5, 5, 5, 5, 5, 5, 6};
 
-u64 rook_mask(usize sq) noexcept
+// clang-format on
+
+u64 rook_mask(usize sq)
 {
     u64 mask = 0;
-    int r = static_cast<int>(sq / 8);
-    int f = static_cast<int>(sq % 8);
+    i32 r = static_cast<i32>(sq / 8);
+    i32 f = static_cast<i32>(sq % 8);
 
-    for (int i = r + 1; i < 7; i++)
-        mask |= (1ULL << (i * 8 + f));
-    for (int i = r - 1; i > 0; i--)
-        mask |= (1ULL << (i * 8 + f));
-    for (int i = f + 1; i < 7; i++)
-        mask |= (1ULL << (r * 8 + i));
-    for (int i = f - 1; i > 0; i--)
-        mask |= (1ULL << (r * 8 + i));
+    for (i32 i = r + 1; i < 7; i++) mask |= (1ULL << (i * 8 + f));
+    for (i32 i = r - 1; i > 0; i--) mask |= (1ULL << (i * 8 + f));
+    for (i32 i = f + 1; i < 7; i++) mask |= (1ULL << (r * 8 + i));
+    for (i32 i = f - 1; i > 0; i--) mask |= (1ULL << (r * 8 + i));
     return mask;
 }
 
-constexpr u64 bishop_mask(usize sq) noexcept
+constexpr u64 bishop_mask(usize sq)
 {
     u64 mask = 0;
-    int r = static_cast<int>(sq / 8);
-    int f = static_cast<int>(sq % 8);
+    i32 r = static_cast<i32>(sq / 8);
+    i32 f = static_cast<i32>(sq % 8);
 
-    for (int i = 1; r + i < 7 && f + i < 7; i++)
-        mask |= (1ULL << ((r + i) * 8 + f + i));
-    for (int i = 1; r + i < 7 && f - i > 0; i++)
-        mask |= (1ULL << ((r + i) * 8 + f - i));
-    for (int i = 1; r - i > 0 && f + i < 7; i++)
-        mask |= (1ULL << ((r - i) * 8 + f + i));
-    for (int i = 1; r - i > 0 && f - i > 0; i++)
-        mask |= (1ULL << ((r - i) * 8 + f - i));
+    for (i32 i = 1; r + i < 7 && f + i < 7; i++) mask |= (1ULL << ((r + i) * 8 + f + i));
+    for (i32 i = 1; r + i < 7 && f - i > 0; i++) mask |= (1ULL << ((r + i) * 8 + f - i));
+    for (i32 i = 1; r - i > 0 && f + i < 7; i++) mask |= (1ULL << ((r - i) * 8 + f + i));
+    for (i32 i = 1; r - i > 0 && f - i > 0; i++) mask |= (1ULL << ((r - i) * 8 + f - i));
     return mask;
 }
 
-u64 rook_attacks_slow(usize sq, u64 occ) noexcept
+u64 rook_attacks_slow(usize sq, u64 occ)
 {
     u64 attacks = 0;
-    int r = static_cast<int>(sq / 8);
-    int f = static_cast<int>(sq % 8);
+    i32 r = static_cast<i32>(sq / 8);
+    i32 f = static_cast<i32>(sq % 8);
 
-    for (int i = r + 1; i < 8; i++)
+    for (i32 i = r + 1; i < 8; i++)
     {
         attacks |= (1ULL << (i * 8 + f));
-        if (occ & (1ULL << (i * 8 + f)))
-            break;
+        if (occ & (1ULL << (i * 8 + f))) break;
     }
-    for (int i = r - 1; i >= 0; i--)
+    for (i32 i = r - 1; i >= 0; i--)
     {
         attacks |= (1ULL << (i * 8 + f));
-        if (occ & (1ULL << (i * 8 + f)))
-            break;
+        if (occ & (1ULL << (i * 8 + f))) break;
     }
-    for (int i = f + 1; i < 8; i++)
+    for (i32 i = f + 1; i < 8; i++)
     {
         attacks |= (1ULL << (r * 8 + i));
-        if (occ & (1ULL << (r * 8 + i)))
-            break;
+        if (occ & (1ULL << (r * 8 + i))) break;
     }
-    for (int i = f - 1; i >= 0; i--)
+    for (i32 i = f - 1; i >= 0; i--)
     {
         attacks |= (1ULL << (r * 8 + i));
-        if (occ & (1ULL << (r * 8 + i)))
-            break;
+        if (occ & (1ULL << (r * 8 + i))) break;
     }
     return attacks;
 }
 
-constexpr u64 bishop_attacks_slow(usize sq, u64 occ) noexcept
+constexpr u64 bishop_attacks_slow(usize sq, u64 occ)
 {
     u64 attacks = 0;
-    int r = static_cast<int>(sq / 8);
-    int f = static_cast<int>(sq % 8);
+    i32 r = static_cast<i32>(sq / 8);
+    i32 f = static_cast<i32>(sq % 8);
 
-    for (int i = 1; r + i < 8 && f + i < 8; i++)
+    for (i32 i = 1; r + i < 8 && f + i < 8; i++)
     {
         attacks |= (1ULL << ((r + i) * 8 + f + i));
-        if (occ & (1ULL << ((r + i) * 8 + f + i)))
-            break;
+        if (occ & (1ULL << ((r + i) * 8 + f + i))) break;
     }
-    for (int i = 1; r + i < 8 && f - i >= 0; i++)
+    for (i32 i = 1; r + i < 8 && f - i >= 0; i++)
     {
         attacks |= (1ULL << ((r + i) * 8 + f - i));
-        if (occ & (1ULL << ((r + i) * 8 + f - i)))
-            break;
+        if (occ & (1ULL << ((r + i) * 8 + f - i))) break;
     }
-    for (int i = 1; r - i >= 0 && f + i < 8; i++)
+    for (i32 i = 1; r - i >= 0 && f + i < 8; i++)
     {
         attacks |= (1ULL << ((r - i) * 8 + f + i));
-        if (occ & (1ULL << ((r - i) * 8 + f + i)))
-            break;
+        if (occ & (1ULL << ((r - i) * 8 + f + i))) break;
     }
-    for (int i = 1; r - i >= 0 && f - i >= 0; i++)
+    for (i32 i = 1; r - i >= 0 && f - i >= 0; i++)
     {
         attacks |= (1ULL << ((r - i) * 8 + f - i));
-        if (occ & (1ULL << ((r - i) * 8 + f - i)))
-            break;
+        if (occ & (1ULL << ((r - i) * 8 + f - i))) break;
     }
     return attacks;
 }
 
-u64 index_to_occupancy(usize index, u64 mask) noexcept
+u64 index_to_occupancy(usize index, u64 mask)
 {
     u64 occ = 0;
-    usize j = 0;
+    u32 j = 0;
     while (mask != 0)
     {
-        int lsb = std::countr_zero(mask);
-        if (index & (1ULL << j))
-            occ |= (1ULL << lsb);
+        u32 lsb = static_cast<u32>(std::countr_zero(mask));
+        if (index & (1ULL << j)) occ |= (1ULL << lsb);
         mask &= mask - 1;
         j++;
     }
@@ -168,7 +154,7 @@ u64 index_to_occupancy(usize index, u64 mask) noexcept
 }
 } // namespace
 
-void init_magic() noexcept
+void init_magic()
 {
     u64* rook_ptr = ROOK_TABLE;
     u64* bishop_ptr = BISHOP_TABLE;

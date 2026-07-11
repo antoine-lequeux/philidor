@@ -2,22 +2,21 @@
 #include "magic.hpp"
 #include "uci.hpp"
 
+#include <print>
+
 int main()
 {
-    std::locale::global(std::locale("en_US.UTF-8"));
     init_magic();
 
     auto result = Board::from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
 
     if (!result)
     {
-        std::cerr << "[FEN Error]: " << result.error() << "\n";
+        std::println(stderr, "[FEN Error]: {}", result.error());
         return 1;
     }
 
     Board board = *result;
-    board.display();
-    launch_perft(board, 7);
-
+    launch_enum(board, 7);
     return 0;
 }

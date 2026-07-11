@@ -5,79 +5,71 @@
 namespace
 {
 template <Color US>
-constexpr u64 shift_pawn_up(u64 bb) noexcept
+constexpr u64 shift_pawn_up(u64 bb)
 {
     return (US == Color::WHITE) ? (bb << 8) : (bb >> 8);
 }
 
 template <Color US>
-constexpr u64 shift_pawn_west(u64 bb) noexcept
+constexpr u64 shift_pawn_west(u64 bb)
 {
     return (US == Color::WHITE) ? ((bb & ~FILE_A) << 7) : ((bb & ~FILE_A) >> 9);
 }
 
 template <Color US>
-constexpr u64 shift_pawn_east(u64 bb) noexcept
+constexpr u64 shift_pawn_east(u64 bb)
 {
     return (US == Color::WHITE) ? ((bb & ~FILE_H) << 9) : ((bb & ~FILE_H) >> 7);
 }
 
 template <Color US>
-constexpr Square pawn_from_up(Square to) noexcept
+constexpr Square pawn_from_up(Square to)
 {
     return (US == Color::WHITE) ? to - 8 : to + 8;
 }
 template <Color US>
-constexpr Square pawn_from_up_2(Square to) noexcept
+constexpr Square pawn_from_up_2(Square to)
 {
     return (US == Color::WHITE) ? to - 16 : to + 16;
 }
 template <Color US>
-constexpr Square pawn_from_west(Square to) noexcept
+constexpr Square pawn_from_west(Square to)
 {
     return (US == Color::WHITE) ? to - 7 : to + 9;
 }
 template <Color US>
-constexpr Square pawn_from_east(Square to) noexcept
+constexpr Square pawn_from_east(Square to)
 {
     return (US == Color::WHITE) ? to - 9 : to + 7;
 }
 
-inline void add_moves(u64 targets, Square from, MoveList& ml) noexcept
+inline void add_moves(u64 targets, Square from, MoveList& ml)
 {
-    for (Square to : Bitloop(targets))
-    {
-        ml.push_back(Move::make(from, to));
-    }
+    for (Square to : Bitloop(targets)) ml.push_back(Move::make(from, to));
 }
 
 template <Color BY>
-inline bool is_attacked_by(const Board& board, Square sq, u64 occ) noexcept
+inline bool is_attacked_by(const Board& board, Square sq, u64 occ)
 {
     constexpr Color US = !BY;
-    constexpr u8 by_idx = static_cast<u8>(BY);
+    constexpr usize by_idx = color_index(BY);
 
-    if (pawn_attacks(sq, US) & board.piece_bb[bb_index(Type::PAWN, by_idx)])
-        return true;
-    if (knight_attacks(sq) & board.piece_bb[bb_index(Type::KNIGHT, by_idx)])
-        return true;
-    if (king_attacks(sq) & (1ULL << board.kings[by_idx]))
-        return true;
+    if (pawn_attacks(sq, US) & board.piece_bb[bb_index(Type::PAWN, by_idx)]) return true;
+    if (knight_attacks(sq) & board.piece_bb[bb_index(Type::KNIGHT, by_idx)]) return true;
+    if (king_attacks(sq) & (1ULL << board.kings[by_idx])) return true;
 
-    if (bishop_attacks(sq, occ) & board.diag_sliders[by_idx])
-        return true;
-    if (rook_attacks(sq, occ) & board.ortho_sliders[by_idx])
-        return true;
+    if (bishop_attacks(sq, occ) & board.diag_sliders[by_idx]) return true;
+    if (rook_attacks(sq, occ) & board.ortho_sliders[by_idx]) return true;
 
     return false;
 }
 
 template <Color US>
-void generate_moves_impl(const Board& board, MoveList& ml) noexcept
+void generate_moves_impl(const Board& board, MoveList& ml)
 {
     constexpr Color THEM = !US;
-    constexpr u8 us_idx = static_cast<u8>(US);
-    constexpr u8 them_idx = static_cast<u8>(THEM);
+    constexpr usize us_idx = color_index(US);
+    constexpr usize them_idx = color_index(THEM);
 
     constexpr u64 PROMO_RANK = (US == Color::WHITE) ? RANK_8 : RANK_1;
     constexpr u64 RANK_3_POV = (US == Color::WHITE) ? RANK_3 : RANK_6;
@@ -92,7 +84,7 @@ void generate_moves_impl(const Board& board, MoveList& ml) noexcept
                          (bishop_attacks(ksq, occ) & board.diag_sliders[them_idx]) |
                          (rook_attacks(ksq, occ) & board.ortho_sliders[them_idx]);
 
-    const int num_checkers = std::popcount(checkers);
+    const i32 num_checkers = std::popcount(checkers);
 
     u64 pinned = 0;
     const u64 pinners = (bishop_attacks(ksq, 0) & board.diag_sliders[them_idx]) |
@@ -101,23 +93,14 @@ void generate_moves_impl(const Board& board, MoveList& ml) noexcept
     for (Square pinner_sq : Bitloop(pinners))
     {
         u64 blockers = squares_between(ksq, pinner_sq) & occ;
-        if (blockers && std::has_single_bit(blockers) && (blockers & our))
-        {
-            pinned |= blockers;
-        }
+        if (blockers && std::has_single_bit(blockers) && (blockers & our)) pinned |= blockers;
     }
 
     const u64 occ_no_king = occ ^ (1ULL << ksq);
     for (Square to : Bitloop(king_attacks(ksq) & ~our))
-    {
-        if (!is_attacked_by<THEM>(board, to, occ_no_king))
-        {
-            ml.push_back(Move::make(ksq, to));
-        }
-    }
+        if (!is_attacked_by<THEM>(board, to, occ_no_king)) ml.push_back(Move::make(ksq, to));
 
-    if (num_checkers > 1)
-        return;
+    if (num_checkers > 1) return;
 
     u64 target_mask = ~0ULL;
     if (num_checkers == 1)
@@ -175,16 +158,10 @@ void generate_moves_impl(const Board& board, MoveList& ml) noexcept
         ml.push_back(Move::make(from, to, Move::PROMOTE_TO_BISHOP_FLAG));
     }
 
-    for (Square to : Bitloop(single & ~PROMO_RANK & target_mask))
-    {
-        ml.push_back(Move::make(pawn_from_up<US>(to), to));
-    }
+    for (Square to : Bitloop(single & ~PROMO_RANK & target_mask)) ml.push_back(Move::make(pawn_from_up<US>(to), to));
 
     const u64 dp = shift_pawn_up<US>(single & RANK_3_POV) & empty & target_mask;
-    for (Square to : Bitloop(dp))
-    {
-        ml.push_back(Move::make(pawn_from_up_2<US>(to), to, Move::PAWN_TWO_UP_FLAG));
-    }
+    for (Square to : Bitloop(dp)) ml.push_back(Move::make(pawn_from_up_2<US>(to), to, Move::PAWN_TWO_UP_FLAG));
 
     const u64 cap_west = shift_pawn_west<US>(free_pawns) & their & target_mask;
     for (Square to : Bitloop(cap_west))
@@ -243,9 +220,7 @@ void generate_moves_impl(const Board& board, MoveList& ml) noexcept
                 {
                     Square two = (US == Color::WHITE) ? from + 16 : from - 16;
                     if ((empty & (1ULL << two)) && (pin_ray & (1ULL << two)) && (target_mask & (1ULL << two)))
-                    {
                         ml.push_back(Move::make(from, two, Move::PAWN_TWO_UP_FLAG));
-                    }
                 }
             }
         }
@@ -279,77 +254,45 @@ void generate_moves_impl(const Board& board, MoveList& ml) noexcept
         {
             bool can_ep = true;
 
-            if (pinned & (1ULL << from))
-            {
-                can_ep = (line_through(ksq, from) & ep_mask) != 0;
-            }
+            if (pinned & (1ULL << from)) can_ep = (line_through(ksq, from) & ep_mask) != 0;
 
             if (can_ep && (ksq / 8 == from / 8))
             {
                 u64 new_occ = (occ ^ (1ULL << from) ^ captured_mask) | ep_mask;
-                if (rook_attacks(ksq, new_occ) & board.ortho_sliders[them_idx])
-                {
-                    can_ep = false;
-                }
+                if (rook_attacks(ksq, new_occ) & board.ortho_sliders[them_idx]) can_ep = false;
             }
 
-            if (can_ep && num_checkers == 1)
-            {
-                can_ep = (target_mask & ep_mask) != 0 || (checkers & captured_mask) != 0;
-            }
+            if (can_ep && num_checkers == 1) can_ep = (target_mask & ep_mask) != 0 || (checkers & captured_mask) != 0;
 
-            if (can_ep)
-            {
-                ml.push_back(Move::make(from, ep_sq, Move::ENPASSANT_CAPTURE_FLAG));
-            }
+            if (can_ep) ml.push_back(Move::make(from, ep_sq, Move::ENPASSANT_CAPTURE_FLAG));
         }
     }
 
     for (Square from : Bitloop(board.piece_bb[bb_index(Type::KNIGHT, us_idx)] & not_pinned))
-    {
         add_moves(knight_attacks(from) & ~our & target_mask, from, ml);
-    }
 
     const u64 bishops = board.piece_bb[bb_index(Type::BISHOP, us_idx)];
     for (Square from : Bitloop(bishops & not_pinned))
-    {
         add_moves(bishop_attacks(from, occ) & ~our & target_mask, from, ml);
-    }
     for (Square from : Bitloop(bishops & pinned))
-    {
         add_moves(bishop_attacks(from, occ) & ~our & target_mask & line_through(ksq, from), from, ml);
-    }
 
     const u64 rooks = board.piece_bb[bb_index(Type::ROOK, us_idx)];
-    for (Square from : Bitloop(rooks & not_pinned))
-    {
-        add_moves(rook_attacks(from, occ) & ~our & target_mask, from, ml);
-    }
+    for (Square from : Bitloop(rooks & not_pinned)) add_moves(rook_attacks(from, occ) & ~our & target_mask, from, ml);
     for (Square from : Bitloop(rooks & pinned))
-    {
         add_moves(rook_attacks(from, occ) & ~our & target_mask & line_through(ksq, from), from, ml);
-    }
 
     const u64 queens = board.piece_bb[bb_index(Type::QUEEN, us_idx)];
-    for (Square from : Bitloop(queens & not_pinned))
-    {
-        add_moves(queen_attacks(from, occ) & ~our & target_mask, from, ml);
-    }
+    for (Square from : Bitloop(queens & not_pinned)) add_moves(queen_attacks(from, occ) & ~our & target_mask, from, ml);
     for (Square from : Bitloop(queens & pinned))
-    {
         add_moves(queen_attacks(from, occ) & ~our & target_mask & line_through(ksq, from), from, ml);
-    }
 }
 } // namespace
 
-void generate_moves(const Board& board, MoveList& ml) noexcept
+void generate_moves(const Board& board, MoveList& ml)
 {
     if (board.side_to_move == Color::WHITE)
-    {
         generate_moves_impl<Color::WHITE>(board, ml);
-    }
     else
-    {
         generate_moves_impl<Color::BLACK>(board, ml);
-    }
 }

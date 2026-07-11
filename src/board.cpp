@@ -2,15 +2,11 @@
 
 #include <charconv>
 #include <format>
-#include <sstream>
-#include <stdexcept>
-#include <vector>
+#include <print>
 
-static constexpr std::array<CastlingRights, 64> CASTLING_UPDATE = []
-{
-    std::array<CastlingRights, 64> arr{};
-    for (auto& rights : arr)
-        rights = CastlingRights::ALL;
+static constexpr std::array<CastlingRights, 64> CASTLING_UPDATE = [] {
+    std::array<CastlingRights, 64> arr {};
+    for (auto& rights : arr) rights = CastlingRights::ALL;
     arr[0] = ~CastlingRights::WQ;                         // a1
     arr[4] = ~(CastlingRights::WK | CastlingRights::WQ);  // e1
     arr[7] = ~CastlingRights::WK;                         // h1
@@ -20,80 +16,68 @@ static constexpr std::array<CastlingRights, 64> CASTLING_UPDATE = []
     return arr;
 }();
 
-void Board::put_piece(Piece p, Square sq) noexcept
+void Board::put_piece(Piece p, Square sq)
 {
     pieces[sq] = p;
     const u64 bit = 1ULL << sq;
     const Type pt = get_piece_type(p);
-    [[assume(static_cast<u8>(pt) >= 1 && static_cast<u8>(pt) <= 6)]];
-    const u8 color_index = static_cast<u8>(get_piece_color(p));
-    const u8 bb_index = (static_cast<u8>(pt) - 1) + color_index * 6;
+    const usize ci = color_index(get_piece_color(p));
 
-    piece_bb[bb_index] |= bit;
-    color_bb[color_index] |= bit;
+    piece_bb[bb_index(pt, ci)] |= bit;
+    color_bb[ci] |= bit;
 
     if (pt == Type::KING)
-        kings[color_index] = sq;
+        kings[ci] = sq;
     else
     {
-        if (pt == Type::ROOK || pt == Type::QUEEN)
-            ortho_sliders[color_index] |= bit;
-        if (pt == Type::BISHOP || pt == Type::QUEEN)
-            diag_sliders[color_index] |= bit;
+        if (pt == Type::ROOK || pt == Type::QUEEN) ortho_sliders[ci] |= bit;
+        if (pt == Type::BISHOP || pt == Type::QUEEN) diag_sliders[ci] |= bit;
     }
 
     occupancy |= bit;
 }
 
-void Board::remove_piece(Piece p, Square sq) noexcept
+void Board::remove_piece(Piece p, Square sq)
 {
     pieces[sq] = EMPTY;
     const u64 bit = ~(1ULL << sq);
     const Type pt = get_piece_type(p);
-    [[assume(static_cast<u8>(pt) >= 1 && static_cast<u8>(pt) <= 6)]];
-    const u8 color_index = static_cast<u8>(get_piece_color(p));
-    const u8 bb_index = (static_cast<u8>(pt) - 1) + color_index * 6;
+    const usize ci = color_index(get_piece_color(p));
 
-    piece_bb[bb_index] &= bit;
-    color_bb[color_index] &= bit;
+    piece_bb[bb_index(pt, ci)] &= bit;
+    color_bb[ci] &= bit;
 
-    if (pt == Type::ROOK || pt == Type::QUEEN)
-        ortho_sliders[color_index] &= bit;
-    if (pt == Type::BISHOP || pt == Type::QUEEN)
-        diag_sliders[color_index] &= bit;
+    if (pt == Type::ROOK || pt == Type::QUEEN) ortho_sliders[ci] &= bit;
+    if (pt == Type::BISHOP || pt == Type::QUEEN) diag_sliders[ci] &= bit;
 
     occupancy &= bit;
 }
 
-void Board::move_piece(Piece p, Square from, Square to) noexcept
+void Board::move_piece(Piece p, Square from, Square to)
 {
     pieces[from] = EMPTY;
     pieces[to] = p;
 
     const Type pt = get_piece_type(p);
-    [[assume(static_cast<u8>(pt) >= 1 && static_cast<u8>(pt) <= 6)]];
-    const u8 color_index = static_cast<u8>(get_piece_color(p));
+    const usize ci = color_index(get_piece_color(p));
 
     const u64 move_mask = (1ULL << from) | (1ULL << to);
-    const u8 bb_index = (static_cast<u8>(pt) - 1) + color_index * 6;
 
-    piece_bb[bb_index] ^= move_mask;
-    color_bb[color_index] ^= move_mask;
+    piece_bb[bb_index(pt, ci)] ^= move_mask;
+    color_bb[ci] ^= move_mask;
 
     if (pt == Type::KING)
-        kings[color_index] = to;
+        kings[ci] = to;
     else
     {
-        if (pt == Type::ROOK || pt == Type::QUEEN)
-            ortho_sliders[color_index] ^= move_mask;
-        if (pt == Type::BISHOP || pt == Type::QUEEN)
-            diag_sliders[color_index] ^= move_mask;
+        if (pt == Type::ROOK || pt == Type::QUEEN) ortho_sliders[ci] ^= move_mask;
+        if (pt == Type::BISHOP || pt == Type::QUEEN) diag_sliders[ci] ^= move_mask;
     }
 
     occupancy ^= move_mask;
 }
 
-void Board::make_move(Move mv) noexcept
+void Board::make_move(Move mv)
 {
     [[assume(ply < 511)]];
 
@@ -131,13 +115,9 @@ void Board::make_move(Move mv) noexcept
     current_state.captured_piece = captured;
 
     if (moved_type == Type::PAWN || captured != EMPTY)
-    {
         next_state.halfmove_clock = 0;
-    }
     else
-    {
         next_state.halfmove_clock++;
-    }
 
     move_piece(moved, from, to);
 
@@ -146,18 +126,10 @@ void Board::make_move(Move mv) noexcept
         const Piece rook = make_piece(Type::ROOK, us);
         switch (to)
         {
-            case 6:
-                move_piece(rook, 7, 5);
-                break; // White Kingside
-            case 2:
-                move_piece(rook, 0, 3);
-                break; // White Queenside
-            case 62:
-                move_piece(rook, 63, 61);
-                break; // Black Kingside
-            case 58:
-                move_piece(rook, 56, 59);
-                break; // Black Queenside
+            case 6: move_piece(rook, 7, 5); break;    // White Kingside
+            case 2: move_piece(rook, 0, 3); break;    // White Queenside
+            case 62: move_piece(rook, 63, 61); break; // Black Kingside
+            case 58: move_piece(rook, 56, 59); break; // Black Queenside
         }
     }
     else if (mv.is_promotion())
@@ -178,7 +150,7 @@ void Board::make_move(Move mv) noexcept
     ply++;
 }
 
-void Board::unmake_move(Move mv) noexcept
+void Board::unmake_move(Move mv)
 {
     [[assume(ply > 0)]];
 
@@ -217,92 +189,79 @@ void Board::unmake_move(Move mv) noexcept
         const Piece rook = make_piece(Type::ROOK, us);
         switch (to)
         {
-            case 6:
-                move_piece(rook, 5, 7);
-                break; // White Kingside
-            case 2:
-                move_piece(rook, 3, 0);
-                break; // White Queenside
-            case 62:
-                move_piece(rook, 61, 63);
-                break; // Black Kingside
-            case 58:
-                move_piece(rook, 59, 56);
-                break; // Black Queenside
+            case 6: move_piece(rook, 5, 7); break;    // White Kingside
+            case 2: move_piece(rook, 3, 0); break;    // White Queenside
+            case 62: move_piece(rook, 61, 63); break; // Black Kingside
+            case 58: move_piece(rook, 59, 56); break; // Black Queenside
         }
     }
 }
 
-Board Board::from_startpos() { return from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1").value(); }
-
-std::expected<Board, std::string> Board::from_fen(std::string fen)
+Board Board::from_startpos()
 {
-    Board board{};
+    return from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1").value();
+}
 
-    std::istringstream iss(fen);
-    std::vector<std::string> parts;
-    std::string part;
-    while (iss >> part)
-        parts.push_back(part);
+static constexpr std::string_view next_token(std::string_view& sv)
+{
+    while (!sv.empty() && sv.front() == ' ') sv.remove_prefix(1);
+    if (sv.empty()) return {};
 
-    if (parts.size() < 4)
-    {
+    usize end = sv.find(' ');
+    if (end == std::string_view::npos) end = sv.size();
+
+    std::string_view token = sv.substr(0, end);
+    sv.remove_prefix(end);
+    return token;
+}
+
+std::expected<Board, std::string> Board::from_fen(std::string_view fen)
+{
+    Board board {};
+
+    std::string_view remaining = fen;
+    std::string_view layout = next_token(remaining);
+    std::string_view active = next_token(remaining);
+    std::string_view castling = next_token(remaining);
+    std::string_view ep = next_token(remaining);
+    std::string_view halfmove = next_token(remaining);
+
+    if (layout.empty() || active.empty() || castling.empty() || ep.empty())
         return std::unexpected("FEN string is incomplete.");
-    }
 
-    std::string layout = parts[0];
-    std::string active = parts[1];
-    std::string castling = parts[2];
-    std::string ep = parts[3];
-    std::string halfmove = parts.size() > 4 ? parts[4] : "0";
+    if (halfmove.empty()) halfmove = "0";
 
-    int rank = 7;
-    int file = 0;
+    u32 rank = 7;
+    u32 file = 0;
 
     for (char ch : layout)
     {
         if (ch == '/')
         {
-            if (file != 8)
-                return std::unexpected(std::format("Rank {} has {} squares instead of 8.", rank + 1, file));
+            if (file != 8) return std::unexpected(std::format("Rank {} has {} squares instead of 8.", rank + 1, file));
+            if (rank == 0) return std::unexpected("Too many ranks provided in FEN layout.");
             rank--;
             file = 0;
-            if (rank < 0)
-                return std::unexpected("Too many ranks provided in FEN layout.");
         }
         else if (ch >= '1' && ch <= '8')
         {
-            file += (ch - '0');
-            if (file > 8)
-                return std::unexpected(std::format("Too many squares on rank {}.", rank + 1));
+            file += static_cast<u32>(ch - '0');
+            if (file > 8) return std::unexpected(std::format("Too many squares on rank {}.", rank + 1));
         }
         else
         {
-            if (file >= 8)
-                return std::unexpected(std::format("Too many squares on rank {}.", rank + 1));
+            if (file >= 8) return std::unexpected(std::format("Too many squares on rank {}.", rank + 1));
 
             Type type;
             Color color = Color::BLACK;
             switch (ch)
             {
-                case 'p':
-                    type = Type::PAWN;
-                    break;
-                case 'n':
-                    type = Type::KNIGHT;
-                    break;
-                case 'b':
-                    type = Type::BISHOP;
-                    break;
-                case 'r':
-                    type = Type::ROOK;
-                    break;
-                case 'q':
-                    type = Type::QUEEN;
-                    break;
-                case 'k':
-                    type = Type::KING;
-                    break;
+                case 'p': type = Type::PAWN; break;
+                case 'n': type = Type::KNIGHT; break;
+                case 'b': type = Type::BISHOP; break;
+                case 'r': type = Type::ROOK; break;
+                case 'q': type = Type::QUEEN; break;
+                case 'k': type = Type::KING; break;
                 case 'P':
                     type = Type::PAWN;
                     color = Color::WHITE;
@@ -327,18 +286,16 @@ std::expected<Board, std::string> Board::from_fen(std::string fen)
                     type = Type::KING;
                     color = Color::WHITE;
                     break;
-                default:
-                    return std::unexpected(std::format("Invalid piece character '{}'.", ch));
+                default: return std::unexpected(std::format("Invalid piece character '{}'.", ch));
             }
 
-            Square sq = static_cast<Square>(rank * 8 + file);
+            Square sq = rank * 8 + file;
             board.put_piece(make_piece(type, color), sq);
             file++;
         }
     }
 
-    if (rank != 0 || file != 8)
-        return std::unexpected("Incomplete FEN board layout.");
+    if (rank != 0 || file != 8) return std::unexpected("Incomplete FEN board layout.");
 
     if (active == "w")
         board.side_to_move = Color::WHITE;
@@ -354,20 +311,11 @@ std::expected<Board, std::string> Board::from_fen(std::string fen)
         {
             switch (c)
             {
-                case 'K':
-                    rights |= CastlingRights::WK;
-                    break;
-                case 'Q':
-                    rights |= CastlingRights::WQ;
-                    break;
-                case 'k':
-                    rights |= CastlingRights::BK;
-                    break;
-                case 'q':
-                    rights |= CastlingRights::BQ;
-                    break;
-                default:
-                    return std::unexpected(std::format("Invalid castling right character '{}'.", c));
+                case 'K': rights |= CastlingRights::WK; break;
+                case 'Q': rights |= CastlingRights::WQ; break;
+                case 'k': rights |= CastlingRights::BK; break;
+                case 'q': rights |= CastlingRights::BQ; break;
+                default: return std::unexpected(std::format("Invalid castling right character '{}'.", c));
             }
         }
     }
@@ -379,12 +327,10 @@ std::expected<Board, std::string> Board::from_fen(std::string fen)
     }
     else
     {
-        if (ep.length() != 2)
-            return std::unexpected("Invalid en passant square format.");
+        if (ep.length() != 2) return std::unexpected("Invalid en passant square format.");
         char f = ep[0];
         char r = ep[1];
-        if (f < 'a' || f > 'h' || r < '1' || r > '8')
-            return std::unexpected("Invalid en passant square coordinates.");
+        if (f < 'a' || f > 'h' || r < '1' || r > '8') return std::unexpected("Invalid en passant square coordinates.");
 
         board.history[0].ep_square = static_cast<Square>((r - '1') * 8 + (f - 'a'));
     }
@@ -392,10 +338,8 @@ std::expected<Board, std::string> Board::from_fen(std::string fen)
     u16 clock_val = 0;
     auto [ptr, ec] = std::from_chars(halfmove.data(), halfmove.data() + halfmove.size(), clock_val);
 
-    if (ec != std::errc{} || ptr != halfmove.data() + halfmove.size())
-    {
+    if (ec != std::errc {} || ptr != halfmove.data() + halfmove.size())
         return std::unexpected("Invalid halfmove clock provided in FEN string.");
-    }
 
     board.history[0].halfmove_clock = clock_val;
 
@@ -404,35 +348,35 @@ std::expected<Board, std::string> Board::from_fen(std::string fen)
 
 void Board::display(bool white_perspective) const
 {
-    std::cout << "  +-----------------+\n";
+    std::string out;
+    out.reserve(512);
 
-    static constexpr std::array<int, 8> NUMS_IN_ORDER = {0, 1, 2, 3, 4, 5, 6, 7};
-    static constexpr std::array<int, 8> NUMS_IN_REVERSE = {7, 6, 5, 4, 3, 2, 1, 0};
+    out += "  +-----------------+\n";
 
-    const auto& ranks = white_perspective ? NUMS_IN_REVERSE : NUMS_IN_ORDER;
-    const auto& files = white_perspective ? NUMS_IN_ORDER : NUMS_IN_REVERSE;
+    constexpr std::array<u32, 8> FORWARD = {0, 1, 2, 3, 4, 5, 6, 7};
+    constexpr std::array<u32, 8> REVERSE = {7, 6, 5, 4, 3, 2, 1, 0};
 
-    for (int rank : ranks)
+    const auto& ranks = white_perspective ? REVERSE : FORWARD;
+    const auto& files = white_perspective ? FORWARD : REVERSE;
+
+    for (u32 rank : ranks)
     {
-        std::cout << rank + 1 << " | ";
-        for (int file : files)
+        out += std::format("{} | ", rank + 1);
+        for (u32 file : files)
         {
-            Square sq = static_cast<Square>(rank * 8 + file);
-            Piece piece = pieces[sq];
-            char ch = piece_to_char(piece);
-            std::cout << ch << " ";
+            Square sq = rank * 8 + file;
+            out += piece_to_char(pieces[sq]);
+            out += ' ';
         }
-        std::cout << "|\n";
+        out += "|\n";
     }
 
-    std::cout << "  +-----------------+\n";
+    out += "  +-----------------+\n";
 
     if (white_perspective)
-    {
-        std::cout << "    a b c d e f g h\n";
-    }
+        out += "    a b c d e f g h\n";
     else
-    {
-        std::cout << "    h g f e d c b a\n";
-    }
+        out += "    h g f e d c b a\n";
+
+    std::print("{}", out);
 }

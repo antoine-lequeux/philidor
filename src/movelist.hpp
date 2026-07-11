@@ -1,49 +1,48 @@
 #pragma once
 
 #include <array>
-#include <cassert>
 
 #include "defines.hpp"
 
-inline constexpr usize MAX_MOVES = 218;
+constexpr usize MAX_MOVES = 218;
 
 class MoveList
 {
 public:
 
-    constexpr MoveList() noexcept : list_size(0) {}
+    constexpr MoveList() = default;
 
-    inline void push_back(Move mv) noexcept
+    void push_back(Move mv)
     {
         [[assume(list_size < MAX_MOVES - 1)]];
         moves[list_size++] = mv;
     }
 
-    inline Move operator[](usize index) const noexcept
+    Move operator[](usize index) const
     {
         [[assume(index < MAX_MOVES)]];
         return moves[index];
     }
 
-    inline Move& operator[](usize index) noexcept
+    Move& operator[](usize index)
     {
         [[assume(index < MAX_MOVES)]];
         return moves[index];
     }
 
-    inline void clear() noexcept { list_size = 0; }
+    void clear() { list_size = 0; }
 
-    inline usize size() const noexcept { return static_cast<usize>(list_size); }
-    inline bool empty() const noexcept { return list_size == 0; }
+    usize size() const { return list_size; }
+    bool empty() const { return list_size == 0; }
 
-    inline const Move* begin() const noexcept { return moves.data(); }
-    inline const Move* end() const noexcept { return moves.data() + list_size; }
+    const Move* begin() const { return moves.data(); }
+    const Move* end() const { return moves.data() + list_size; }
 
-    inline Move* begin() noexcept { return moves.data(); }
-    inline Move* end() noexcept { return moves.data() + list_size; }
+    Move* begin() { return moves.data(); }
+    Move* end() { return moves.data() + list_size; }
 
 private:
 
     std::array<Move, MAX_MOVES> moves;
-    u16 list_size = 0;
+    u32 list_size = 0;
 };
