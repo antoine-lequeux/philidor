@@ -31,10 +31,17 @@ void Board::put_piece(Piece p, Square sq) noexcept
 
     piece_bb[bb_index] |= bit;
     color_bb[color_index] |= bit;
-    if (pt == Type::ROOK || pt == Type::QUEEN)
-        ortho_sliders[color_index] |= bit;
-    if (pt == Type::BISHOP || pt == Type::QUEEN)
-        diag_sliders[color_index] |= bit;
+
+    if (pt == Type::KING)
+        kings[color_index] = sq;
+    else
+    {
+        if (pt == Type::ROOK || pt == Type::QUEEN)
+            ortho_sliders[color_index] |= bit;
+        if (pt == Type::BISHOP || pt == Type::QUEEN)
+            diag_sliders[color_index] |= bit;
+    }
+
     occupancy |= bit;
 }
 
@@ -49,10 +56,12 @@ void Board::remove_piece(Piece p, Square sq) noexcept
 
     piece_bb[bb_index] &= bit;
     color_bb[color_index] &= bit;
+
     if (pt == Type::ROOK || pt == Type::QUEEN)
         ortho_sliders[color_index] &= bit;
     if (pt == Type::BISHOP || pt == Type::QUEEN)
         diag_sliders[color_index] &= bit;
+
     occupancy &= bit;
 }
 
@@ -70,10 +79,17 @@ void Board::move_piece(Piece p, Square from, Square to) noexcept
 
     piece_bb[bb_index] ^= move_mask;
     color_bb[color_index] ^= move_mask;
-    if (pt == Type::ROOK || pt == Type::QUEEN)
-        ortho_sliders[color_index] ^= move_mask;
-    if (pt == Type::BISHOP || pt == Type::QUEEN)
-        diag_sliders[color_index] ^= move_mask;
+
+    if (pt == Type::KING)
+        kings[color_index] = to;
+    else
+    {
+        if (pt == Type::ROOK || pt == Type::QUEEN)
+            ortho_sliders[color_index] ^= move_mask;
+        if (pt == Type::BISHOP || pt == Type::QUEEN)
+            diag_sliders[color_index] ^= move_mask;
+    }
+
     occupancy ^= move_mask;
 }
 
@@ -221,7 +237,7 @@ Board Board::from_startpos() { return from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPP
 
 std::expected<Board, std::string> Board::from_fen(std::string fen)
 {
-    Board board;
+    Board board{};
 
     std::istringstream iss(fen);
     std::vector<std::string> parts;

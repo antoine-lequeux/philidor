@@ -16,6 +16,10 @@ target_sources(philidor PRIVATE
     src/movelist.hpp
     src/magic.hpp
     src/magic.cpp
+    src/masks.hpp
+    src/movegen.hpp
+    src/movegen.cpp
+    src/uci.hpp
 )
 
 include(CheckIPOSupported)

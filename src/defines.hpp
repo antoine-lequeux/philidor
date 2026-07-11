@@ -1,5 +1,6 @@
 #pragma once
 
+#include <bit>
 #include <cstdint>
 #include <format>
 #include <string>
@@ -83,7 +84,7 @@ struct Move
 
     static constexpr Move make(Square start, Square target) noexcept { return Move(start | (target << 6)); }
 
-    static constexpr Move make_with_flag(Square start, Square target, u16 flag) noexcept
+    static constexpr Move make(Square start, Square target, u16 flag) noexcept
     {
         return Move(start | (target << 6) | (flag << 12));
     }
@@ -109,7 +110,7 @@ struct Move
             case PROMOTE_TO_BISHOP_FLAG:
                 return Type::BISHOP;
             default:
-                return Type::QUEEN;
+                return Type::EMPTY;
         }
     }
 
@@ -194,3 +195,38 @@ inline constexpr CastlingRights& operator|=(CastlingRights& lhs, CastlingRights 
 }
 
 using Bitboard = u64;
+
+struct Bitloop
+{
+    Bitboard bb;
+    constexpr explicit Bitloop(Bitboard b) noexcept : bb(b) {}
+
+    struct Iterator
+    {
+        Bitboard bb;
+        constexpr bool operator!=(const Iterator& other) const noexcept { return bb != other.bb; }
+        constexpr Iterator& operator++() noexcept
+        {
+            bb &= bb - 1;
+            return *this;
+        }
+        constexpr Square operator*() const noexcept { return static_cast<Square>(std::countr_zero(bb)); }
+    };
+
+    constexpr Iterator begin() const noexcept { return {bb}; }
+    constexpr Iterator end() const noexcept { return {0}; }
+};
+
+inline constexpr Bitboard FILE_A = 0x0101010101010101ULL;
+inline constexpr Bitboard FILE_H = 0x8080808080808080ULL;
+
+inline constexpr Bitboard RANK_1 = 0x00000000000000FFULL;
+inline constexpr Bitboard RANK_3 = 0x0000000000FF0000ULL;
+inline constexpr Bitboard RANK_6 = 0x0000FF0000000000ULL;
+inline constexpr Bitboard RANK_8 = 0xFF00000000000000ULL;
+
+inline constexpr Bitboard WHITE_OO_BLOCKERS = 0x60ULL;  // f1, g1
+inline constexpr Bitboard WHITE_OOO_BLOCKERS = 0x0EULL; // b1, c1, d1
+
+inline constexpr Bitboard BLACK_OO_BLOCKERS = 0x6000000000000000ULL;  // f8, g8
+inline constexpr Bitboard BLACK_OOO_BLOCKERS = 0x0E00000000000000ULL; // b8, c8, d8

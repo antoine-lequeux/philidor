@@ -15,10 +15,8 @@ struct State
     u16 halfmove_clock;
 };
 
-class Board
+struct Board
 {
-public:
-
     void make_move(Move mv) noexcept;
     void unmake_move(Move mv) noexcept;
 
@@ -27,19 +25,18 @@ public:
 
     void display(bool white_perspective = true) const;
 
+    std::array<Piece, 64> pieces{};
+    std::array<Square, 2> kings{};
+    std::array<Bitboard, 12> piece_bb{};
+    std::array<Bitboard, 2> color_bb{};
+    std::array<Bitboard, 2> ortho_sliders{};
+    std::array<Bitboard, 2> diag_sliders{};
+    Bitboard occupancy = 0;
+    Color side_to_move = Color::WHITE;
+    usize ply = 0;
+    std::array<State, 512> history{};
+
 private:
-
-    Board() : pieces({}), piece_bb({}), color_bb({}), occupancy(0), side_to_move(Color::WHITE), ply(0), history({}) {}
-
-    std::array<Piece, 64> pieces;
-    std::array<Bitboard, 12> piece_bb;
-    std::array<Bitboard, 2> color_bb;
-    std::array<Bitboard, 2> ortho_sliders;
-    std::array<Bitboard, 2> diag_sliders;
-    Bitboard occupancy;
-    Color side_to_move;
-    usize ply;
-    std::array<State, 512> history;
 
     void put_piece(Piece p, Square sq) noexcept;
     void remove_piece(Piece p, Square sq) noexcept;

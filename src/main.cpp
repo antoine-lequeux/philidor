@@ -1,11 +1,13 @@
 #include "board.hpp"
 #include "magic.hpp"
+#include "uci.hpp"
 
 int main()
 {
+    std::locale::global(std::locale("en_US.UTF-8"));
     init_magic();
 
-    auto result = Board::from_fen("r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - ");
+    auto result = Board::from_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
 
     if (!result)
     {
@@ -15,6 +17,7 @@ int main()
 
     Board board = *result;
     board.display();
+    launch_perft(board, 7);
 
     return 0;
 }
