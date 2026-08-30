@@ -63,19 +63,50 @@ inline void iterative_deepening(
 
     for (i32 depth = 1; depth <= max_depth; depth++)
     {
-        RootResult res = search_root(board, depth, -INF, INF, state);
-        if (!res.completed)
+        i32 delta = 25;
+        Score alpha = -INF;
+        Score beta = INF;
+
+        if (depth >= 4)
         {
-            if (!res.best_move.is_null() && res.score > score)
-            {
-                score = res.score;
-                best_move = res.best_move;
-            }
-            break;
+            alpha = score - delta;
+            beta = score + delta;
         }
 
-        score = res.score;
-        best_move = res.best_move;
+        while (true)
+        {
+            RootResult res = search_root(board, depth, alpha, beta, state);
+            if (!res.completed)
+            {
+                if (!res.best_move.is_null() && res.score > score)
+                {
+                    score = res.score;
+                    best_move = res.best_move;
+                }
+                break;
+            }
+
+            score = res.score;
+            best_move = res.best_move;
+
+            if (score <= alpha)
+            {
+                beta = (alpha + beta) / 2;
+                alpha = std::max(-INF, alpha - delta);
+                delta += delta / 2;
+            }
+            else if (score >= beta)
+            {
+                beta = std::min(INF, beta + delta);
+                delta += delta / 2;
+            }
+            else
+            {
+                break; // Score is within window.
+            }
+        }
+
+        if (state.time_up()) break;
 
         i64 elapsed = now_ms() - state.start_time;
         i64 nps = elapsed > 0 ? (state.nodes * 1000) / elapsed : 0;

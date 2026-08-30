@@ -39,6 +39,15 @@ struct Board
     template <GenType gt>
     MoveList generate_moves() const;
 
+    void make_null();
+    void unmake_null();
+
+    bool has_non_pawn_material(Color c) const
+    {
+        return (piece_bb[bb_index(Type::KNIGHT, c)] | piece_bb[bb_index(Type::BISHOP, c)] |
+                piece_bb[bb_index(Type::ROOK, c)] | piece_bb[bb_index(Type::QUEEN, c)]) != 0;
+    }
+
     u64 zobrist_key() const { return history[ply].hash; }
     bool in_check() const;
     bool is_draw() const;

@@ -273,6 +273,37 @@ template MoveList Board::generate_moves<GenType::CAPTURES>() const;
 template MoveList Board::generate_moves<GenType::QUIETS>() const;
 template MoveList Board::generate_moves<GenType::ALL>() const;
 
+void Board::make_null()
+{
+    [[assume(ply < 511)]];
+
+    State& current_state = history[ply];
+    State& next_state = history[ply + 1];
+
+    next_state = current_state;
+    next_state.ep_square = NO_SQUARE;
+    next_state.halfmove_clock++;
+    next_state.moved_piece = EMPTY;
+    next_state.captured_piece = EMPTY;
+
+    u64 hash = current_state.hash;
+    if (current_state.ep_square != NO_SQUARE) hash ^= zobrist::get_ep_key(current_state.ep_square);
+    hash ^= zobrist::get_side_key();
+    next_state.hash = hash;
+
+    nnue.copy_accumulator(ply, ply + 1);
+
+    side_to_move = !side_to_move;
+    ply++;
+}
+
+void Board::unmake_null()
+{
+    [[assume(ply > 0)]];
+    ply--;
+    side_to_move = !side_to_move;
+}
+
 Bitboard Board::occupied_by(Color color, Bitboard occ) const
 {
     return color_bb[static_cast<u8>(color)] & occ;

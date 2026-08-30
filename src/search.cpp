@@ -144,6 +144,28 @@ Score negamax(Board& board, i32 depth, i32 ply, Score alpha, Score beta, SearchS
 
     if (depth <= 0) return qsearch(board, alpha, beta, state);
 
+    bool in_check = board.in_check();
+
+    if (!in_check && ply > 0 && depth >= 3)
+    {
+        bool prev_was_null = board.history[board.ply - 1].move.is_null();
+        if (!prev_was_null && board.has_non_pawn_material(board.side_to_move))
+        {
+            Score eval = board.evaluate();
+            if (eval >= beta)
+            {
+                i32 R = 3 + depth / 6;
+                board.make_null();
+                Score null_score = -negamax(board, depth - 1 - R, ply + 1, -beta, -beta + 1, state);
+                board.unmake_null();
+
+                if (state.stop && state.stop->load(std::memory_order_relaxed)) return 0;
+
+                if (null_score >= beta) return null_score >= MATE_THRESHOLD ? beta : null_score;
+            }
+        }
+    }
+
     Move tt_move = tt_entry ? tt_entry->move : Move {};
 
     MoveList ml = board.generate_moves<GenType::ALL>();
@@ -215,6 +237,7 @@ RootResult search_root(Board& board, i32 depth, Score alpha, Score beta, SearchS
 
     Score best_score = -INF;
     Move best_move {};
+    Bound bound = Bound::UPPER;
 
     for (usize idx = 0; idx < ml.size(); ++idx)
     {
@@ -233,10 +256,20 @@ RootResult search_root(Board& board, i32 depth, Score alpha, Score beta, SearchS
             best_move = m;
         }
 
-        if (score > alpha) alpha = score;
+        if (score > alpha)
+        {
+            alpha = score;
+            bound = Bound::EXACT;
+        }
+
+        if (alpha >= beta)
+        {
+            bound = Bound::LOWER;
+            break;
+        }
     }
 
-    state.tt->store(hash, depth, 0, best_score, Bound::EXACT, best_move);
+    state.tt->store(hash, depth, 0, best_score, bound, best_move);
 
     result.score = best_score;
     result.best_move = best_move;
