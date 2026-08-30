@@ -18,6 +18,13 @@ using usize = size_t;
 using f32 = float;
 using f64 = double;
 
+using Score = i32;
+
+constexpr Score INF = 32000;
+constexpr Score MATE_VALUE = 31000;
+constexpr Score MATE_THRESHOLD = MATE_VALUE - 1000;
+constexpr usize MAX_PLY = 128;
+
 using Piece = u32;
 
 constexpr Piece EMPTY = 0;
@@ -118,6 +125,7 @@ struct Move
     static constexpr u16 PROMOTE_TO_KNIGHT_FLAG = 5;
     static constexpr u16 PROMOTE_TO_ROOK_FLAG = 6;
     static constexpr u16 PROMOTE_TO_BISHOP_FLAG = 7;
+    static constexpr u16 CAPTURE_FLAG = 8;
 
     static constexpr u16 START_SQUARE_MASK = 0b0000000000111111;
     static constexpr u16 TARGET_SQUARE_MASK = 0b0000111111000000;
@@ -139,11 +147,11 @@ struct Move
 
     constexpr u16 get_flag() const { return bits >> 12; }
 
-    constexpr bool is_promotion() const { return get_flag() >= PROMOTE_TO_QUEEN_FLAG; }
+    constexpr bool is_promotion() const { return (get_flag() & ~CAPTURE_FLAG) >= PROMOTE_TO_QUEEN_FLAG; }
 
     constexpr Type get_promotion_type() const
     {
-        switch (get_flag())
+        switch (get_flag() & ~CAPTURE_FLAG)
         {
             case PROMOTE_TO_QUEEN_FLAG: return Type::QUEEN;
             case PROMOTE_TO_KNIGHT_FLAG: return Type::KNIGHT;
@@ -161,6 +169,8 @@ struct Move
     constexpr bool is_null() const { return bits == 0; }
 
     constexpr bool operator==(const Move& other) const = default;
+
+    constexpr bool is_capture() const { return (get_flag() & CAPTURE_FLAG) != 0; }
 
     std::string to_uci() const
     {
@@ -259,3 +269,10 @@ constexpr Bitboard WHITE_OOO_BLOCKERS = 0x0EULL; // b1, c1, d1
 
 constexpr Bitboard BLACK_OO_BLOCKERS = 0x6000000000000000ULL;  // f8, g8
 constexpr Bitboard BLACK_OOO_BLOCKERS = 0x0E00000000000000ULL; // b8, c8, d8
+
+enum class GenType
+{
+    CAPTURES,
+    QUIETS,
+    ALL
+};

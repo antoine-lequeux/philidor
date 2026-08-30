@@ -1,200 +1,51 @@
 #include "board.hpp"
+#include "defines.hpp"
+#include "magic.hpp"
+#include "masks.hpp"
+#include "movegen.hpp"
+#include "nnue.hpp"
 
 #include <charconv>
+#include <eve/eve.hpp>
 #include <format>
 #include <print>
 
-static constexpr std::array<CastlingRights, 64> CASTLING_UPDATE = [] {
-    std::array<CastlingRights, 64> arr {};
-    for (auto& rights : arr) rights = CastlingRights::ALL;
-    arr[0] = ~CastlingRights::WQ;                         // a1
-    arr[4] = ~(CastlingRights::WK | CastlingRights::WQ);  // e1
-    arr[7] = ~CastlingRights::WK;                         // h1
-    arr[56] = ~CastlingRights::BQ;                        // a8
-    arr[60] = ~(CastlingRights::BK | CastlingRights::BQ); // e8
-    arr[63] = ~CastlingRights::BK;                        // h8
-    return arr;
-}();
+Board::Board() = default;
 
-void Board::put_piece(Piece p, Square sq)
+Board::~Board() = default;
+
+Board::Board(const Board& other)
 {
-    pieces[sq] = p;
-    const u64 bit = 1ULL << sq;
-    const Type pt = get_piece_type(p);
-    const usize ci = color_index(get_piece_color(p));
-
-    piece_bb[bb_index(pt, ci)] |= bit;
-    color_bb[ci] |= bit;
-
-    if (pt == Type::KING)
-        kings[ci] = sq;
-    else
-    {
-        if (pt == Type::ROOK || pt == Type::QUEEN) ortho_sliders[ci] |= bit;
-        if (pt == Type::BISHOP || pt == Type::QUEEN) diag_sliders[ci] |= bit;
-    }
-
-    occupancy |= bit;
+    pieces = other.pieces;
+    kings = other.kings;
+    piece_bb = other.piece_bb;
+    color_bb = other.color_bb;
+    ortho_sliders = other.ortho_sliders;
+    diag_sliders = other.diag_sliders;
+    occupancy = other.occupancy;
+    side_to_move = other.side_to_move;
+    ply = other.ply;
+    history = other.history;
+    nnue = other.nnue;
 }
 
-void Board::remove_piece(Piece p, Square sq)
+Board& Board::operator=(const Board& other)
 {
-    pieces[sq] = EMPTY;
-    const u64 bit = ~(1ULL << sq);
-    const Type pt = get_piece_type(p);
-    const usize ci = color_index(get_piece_color(p));
-
-    piece_bb[bb_index(pt, ci)] &= bit;
-    color_bb[ci] &= bit;
-
-    if (pt == Type::ROOK || pt == Type::QUEEN) ortho_sliders[ci] &= bit;
-    if (pt == Type::BISHOP || pt == Type::QUEEN) diag_sliders[ci] &= bit;
-
-    occupancy &= bit;
-}
-
-void Board::move_piece(Piece p, Square from, Square to)
-{
-    pieces[from] = EMPTY;
-    pieces[to] = p;
-
-    const Type pt = get_piece_type(p);
-    const usize ci = color_index(get_piece_color(p));
-
-    const u64 move_mask = (1ULL << from) | (1ULL << to);
-
-    piece_bb[bb_index(pt, ci)] ^= move_mask;
-    color_bb[ci] ^= move_mask;
-
-    if (pt == Type::KING)
-        kings[ci] = to;
-    else
+    if (this != &other)
     {
-        if (pt == Type::ROOK || pt == Type::QUEEN) ortho_sliders[ci] ^= move_mask;
-        if (pt == Type::BISHOP || pt == Type::QUEEN) diag_sliders[ci] ^= move_mask;
+        pieces = other.pieces;
+        kings = other.kings;
+        piece_bb = other.piece_bb;
+        color_bb = other.color_bb;
+        ortho_sliders = other.ortho_sliders;
+        diag_sliders = other.diag_sliders;
+        occupancy = other.occupancy;
+        side_to_move = other.side_to_move;
+        ply = other.ply;
+        history = other.history;
+        nnue = other.nnue;
     }
-
-    occupancy ^= move_mask;
-}
-
-void Board::make_move(Move mv)
-{
-    [[assume(ply < 511)]];
-
-    const Square from = mv.get_start_square();
-    const Square to = mv.get_target_square();
-    const u16 flag = mv.get_flag();
-
-    const Piece moved = pieces[from];
-
-    [[assume(moved != EMPTY)]];
-
-    const Type moved_type = get_piece_type(moved);
-    const Color us = side_to_move;
-
-    Piece captured = pieces[to];
-
-    State& current_state = history[ply];
-    State& next_state = history[ply + 1];
-
-    next_state = current_state;
-    next_state.ep_square = NO_SQUARE;
-
-    current_state.moved_piece = moved;
-
-    if (flag == Move::ENPASSANT_CAPTURE_FLAG)
-    {
-        Square capture_sq = (us == Color::WHITE) ? to - 8 : to + 8;
-        captured = pieces[capture_sq];
-        remove_piece(captured, capture_sq);
-    }
-    else if (captured != EMPTY)
-    {
-        remove_piece(captured, to);
-    }
-    current_state.captured_piece = captured;
-
-    if (moved_type == Type::PAWN || captured != EMPTY)
-        next_state.halfmove_clock = 0;
-    else
-        next_state.halfmove_clock++;
-
-    move_piece(moved, from, to);
-
-    if (flag == Move::CASTLE_FLAG)
-    {
-        const Piece rook = make_piece(Type::ROOK, us);
-        switch (to)
-        {
-            case 6: move_piece(rook, 7, 5); break;    // White Kingside
-            case 2: move_piece(rook, 0, 3); break;    // White Queenside
-            case 62: move_piece(rook, 63, 61); break; // Black Kingside
-            case 58: move_piece(rook, 56, 59); break; // Black Queenside
-        }
-    }
-    else if (mv.is_promotion())
-    {
-        const Piece promoted = make_piece(mv.get_promotion_type(), us);
-        remove_piece(moved, to);
-        put_piece(promoted, to);
-    }
-    else if (flag == Move::PAWN_TWO_UP_FLAG)
-    {
-        next_state.ep_square = (us == Color::WHITE) ? to - 8 : to + 8;
-    }
-
-    next_state.castling_rights &= CASTLING_UPDATE[from];
-    next_state.castling_rights &= CASTLING_UPDATE[to];
-
-    side_to_move = !side_to_move;
-    ply++;
-}
-
-void Board::unmake_move(Move mv)
-{
-    [[assume(ply > 0)]];
-
-    ply--;
-    side_to_move = !side_to_move;
-
-    const Square from = mv.get_start_square();
-    const Square to = mv.get_target_square();
-    const u16 flag = mv.get_flag();
-
-    const State& state = history[ply];
-    const Piece moved = state.moved_piece;
-    const Piece captured = state.captured_piece;
-    const Color us = side_to_move;
-
-    if (mv.is_promotion())
-    {
-        remove_piece(pieces[to], to);
-        put_piece(moved, to);
-    }
-
-    move_piece(moved, to, from);
-
-    if (flag == Move::ENPASSANT_CAPTURE_FLAG)
-    {
-        Square capture_sq = (us == Color::WHITE) ? to - 8 : to + 8;
-        put_piece(captured, capture_sq);
-    }
-    else if (captured != EMPTY)
-    {
-        put_piece(captured, to);
-    }
-
-    if (flag == Move::CASTLE_FLAG)
-    {
-        const Piece rook = make_piece(Type::ROOK, us);
-        switch (to)
-        {
-            case 6: move_piece(rook, 5, 7); break;    // White Kingside
-            case 2: move_piece(rook, 3, 0); break;    // White Queenside
-            case 62: move_piece(rook, 61, 63); break; // Black Kingside
-            case 58: move_piece(rook, 59, 56); break; // Black Queenside
-        }
-    }
+    return *this;
 }
 
 Board Board::from_startpos()
@@ -342,6 +193,9 @@ std::expected<Board, std::string> Board::from_fen(std::string_view fen)
         return std::unexpected("Invalid halfmove clock provided in FEN string.");
 
     board.history[0].halfmove_clock = clock_val;
+    board.history[0].hash = zobrist::compute_hash(board);
+
+    board.nnue.inputs_full_update(0, board.pieces, board.kings);
 
     return board;
 }
@@ -379,4 +233,67 @@ void Board::display(bool white_perspective) const
         out += "    h g f e d c b a\n";
 
     std::print("{}", out);
+}
+
+bool Board::in_check() const
+{
+    return is_in_check(*this, side_to_move);
+}
+
+bool Board::is_draw() const
+{
+    if (history[ply].halfmove_clock >= 100) return true;
+    if (ply < 2) return false;
+
+    u64 current_hash = history[ply].hash;
+    u32 limit = ply > history[ply].halfmove_clock ? ply - history[ply].halfmove_clock : 0;
+
+    for (u32 p = ply - 2; p >= limit; p -= 2)
+    {
+        if (history[p].hash == current_hash) return true;
+        if (p < 2) break;
+    }
+    return false;
+}
+
+Score Board::evaluate() const
+{
+    return nnue.evaluate(color_index(side_to_move), ply);
+}
+
+template <GenType gt>
+MoveList Board::generate_moves() const
+{
+    MoveList ml;
+    generate_moves_interface<gt>(*this, ml);
+    return ml;
+}
+
+template MoveList Board::generate_moves<GenType::CAPTURES>() const;
+template MoveList Board::generate_moves<GenType::QUIETS>() const;
+template MoveList Board::generate_moves<GenType::ALL>() const;
+
+Bitboard Board::occupied_by(Color color, Bitboard occ) const
+{
+    return color_bb[static_cast<u8>(color)] & occ;
+}
+
+Bitboard Board::attackers_to(Square sq, Bitboard occ) const
+{
+    Bitboard attackers = 0;
+    attackers |= pawn_attacks(sq, Color::WHITE) & piece_bb[bb_index(Type::PAWN, 1)]; // Black pawns attacking sq
+    attackers |= pawn_attacks(sq, Color::BLACK) & piece_bb[bb_index(Type::PAWN, 0)]; // White pawns attacking sq
+
+    attackers |= knight_attacks(sq) & pieces_of_type(Type::KNIGHT);
+    attackers |= king_attacks(sq) & pieces_of_type(Type::KING);
+
+    attackers |= bishop_attacks(sq, occ) & (pieces_of_type(Type::BISHOP) | pieces_of_type(Type::QUEEN));
+    attackers |= rook_attacks(sq, occ) & (pieces_of_type(Type::ROOK) | pieces_of_type(Type::QUEEN));
+
+    return attackers;
+}
+
+Bitboard Board::pieces_of_type(Type type) const
+{
+    return piece_bb[bb_index(type, 0)] | piece_bb[bb_index(type, 1)];
 }

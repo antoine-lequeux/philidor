@@ -95,7 +95,11 @@ target_sources(philidor PRIVATE
     src/main.cpp
     src/board.cpp
     src/magic.cpp
-    src/movegen.cpp
+    src/nnue.cpp
+    src/tt.cpp
+    src/uci.cpp
+    src/zobrist.cpp
+    src/search.cpp
 )
 
 target_link_libraries(philidor PRIVATE
@@ -130,6 +134,7 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         -Wzero-as-null-pointer-constant
         -Wsuggest-override
         -Wheader-hygiene
+        -Wno-c23-extensions
     )
 
     # Optimization flags for Release
