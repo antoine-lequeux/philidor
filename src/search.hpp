@@ -7,7 +7,37 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstring>
 #include <iostream>
+#include <memory>
+
+namespace Params
+{
+constexpr Score tt_move_score = 29149;
+constexpr Score promotion_bonus = 20386;
+constexpr Score good_capture = 9743;
+constexpr Score killer_score_0 = 8818;
+constexpr Score killer_score_1 = 7732;
+constexpr Score countermove_score = 6930;
+constexpr Score bad_capture = -5409;
+
+constexpr f64 lmr_base = 0.877806;
+constexpr f64 lmr_divisor = 2.3931;
+constexpr i32 lmr_history_divisor = 3904;
+
+constexpr i32 history_bonus_max = 401;
+constexpr i32 history_bonus_mult = 1;
+
+constexpr i32 rfp_max_depth = 4;
+constexpr i32 rfp_multiplier = 72;
+
+constexpr i32 nmp_min_depth = 3;
+constexpr i32 nmp_base_r = 3;
+constexpr i32 nmp_depth_divisor = 6;
+
+constexpr i32 fp_max_depth = 4;
+constexpr i32 fp_multiplier = 155;
+} // namespace Params
 
 inline i64 now_ms()
 {
@@ -22,6 +52,27 @@ struct SearchState
     i64 start_time = 0;
     i64 hard_time_limit_ms = 999999999;
     std::atomic_bool* stop = nullptr;
+
+    // Killer moves (2 slots per ply).
+    Move killers[MAX_PLY][2] {};
+
+    // History heuristic ([color][from_to] butterfly table).
+    i32 history[2][4096] {};
+
+    // Countermove heuristic ([piece][to_square] -> move that refuted it).
+    Move countermoves[16][64] {};
+
+    // Continuation history ([prev_piece][prev_to][piece][to]).
+    // 1-ply (indexed by previous move) and 2-ply (indexed by move two plies ago).
+    i16 cont_history[2][16][64][16][64] {};
+
+    void clear_heuristics()
+    {
+        std::memset(killers, 0, sizeof(killers));
+        std::memset(history, 0, sizeof(history));
+        std::memset(countermoves, 0, sizeof(countermoves));
+        std::memset(cont_history, 0, sizeof(cont_history));
+    }
 
     bool time_up()
     {
@@ -52,11 +103,12 @@ inline void iterative_deepening(
     Board& board, i32 max_depth, i64 hard_limit_ms, i64 soft_limit_ms, TranspositionTable* tt, std::atomic_bool* stop
 )
 {
-    SearchState state;
-    state.start_time = now_ms();
-    state.hard_time_limit_ms = hard_limit_ms;
-    state.tt = tt;
-    state.stop = stop;
+    auto state = std::make_unique<SearchState>();
+    state->start_time = now_ms();
+    state->hard_time_limit_ms = hard_limit_ms;
+    state->tt = tt;
+    state->stop = stop;
+    state->clear_heuristics();
 
     Move best_move = Move {};
     Score score = 0;
@@ -75,7 +127,7 @@ inline void iterative_deepening(
 
         while (true)
         {
-            RootResult res = search_root(board, depth, alpha, beta, state);
+            RootResult res = search_root(board, depth, alpha, beta, *state);
             if (!res.completed)
             {
                 if (!res.best_move.is_null() && res.score > score)
@@ -106,10 +158,10 @@ inline void iterative_deepening(
             }
         }
 
-        if (state.time_up()) break;
+        if (state->time_up()) break;
 
-        i64 elapsed = now_ms() - state.start_time;
-        i64 nps = elapsed > 0 ? (state.nodes * 1000) / elapsed : 0;
+        i64 elapsed = now_ms() - state->start_time;
+        i64 nps = elapsed > 0 ? (state->nodes * 1000) / elapsed : 0;
 
         std::string score_str;
         if (score > MATE_THRESHOLD)
@@ -127,7 +179,7 @@ inline void iterative_deepening(
             score_str = "cp " + std::to_string(score);
         }
 
-        std::cout << "info depth " << depth << " score " << score_str << " nodes " << state.nodes << " nps " << nps
+        std::cout << "info depth " << depth << " score " << score_str << " nodes " << state->nodes << " nps " << nps
                   << " time " << elapsed << " pv";
 
         Board pv_board = board;
@@ -160,7 +212,7 @@ inline void iterative_deepening(
         }
         std::cout << std::endl;
 
-        if (now_ms() - state.start_time >= soft_limit_ms) break;
+        if (now_ms() - state->start_time >= soft_limit_ms) break;
     }
 
     std::cout << "bestmove " << best_move.to_uci() << std::endl;
