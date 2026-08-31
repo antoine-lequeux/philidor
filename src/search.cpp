@@ -16,17 +16,35 @@ constexpr i32 MVV_LVA[7][7] = {{0, 0, 0, 0, 0, 0, 0},
 // clang-format on
 
 static i32 LMR_TABLE[64][64];
-static bool LMR_INIT = []() {
+
+void init_lmr_table_internal()
+{
     for (i32 d = 1; d < 64; d++)
     {
         for (i32 m = 1; m < 64; m++)
         {
-            LMR_TABLE[d][m] = static_cast<i32>(Params::lmr_base + std::log(d) * std::log(m) / Params::lmr_divisor);
+            f64 lmr_base = Params::lmr_base_100 / 100.0;
+            f64 lmr_divisor = Params::lmr_divisor_100 / 100.0;
+            LMR_TABLE[d][m] = static_cast<i32>(lmr_base + std::log(d) * std::log(m) / lmr_divisor);
             if (LMR_TABLE[d][m] < 0) LMR_TABLE[d][m] = 0;
         }
     }
+}
+
+static bool LMR_INIT = []() {
+    init_lmr_table_internal();
     return true;
 }();
+
+#ifdef TUNE_BUILD
+namespace Params
+{
+void init_lmr_table()
+{
+    init_lmr_table_internal();
+}
+} // namespace Params
+#endif
 
 constexpr std::array<Score, 7> SEE_VALUES = {0, 100, 300, 320, 500, 920, 20000};
 

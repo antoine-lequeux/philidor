@@ -13,34 +13,89 @@
 
 namespace Params
 {
-constexpr Score tt_move_score = 29149;
-constexpr Score promotion_bonus = 20386;
-constexpr Score good_capture = 9743;
-constexpr Score killer_score_0 = 8818;
-constexpr Score killer_score_1 = 7732;
-constexpr Score countermove_score = 6930;
-constexpr Score bad_capture = -5409;
+#ifdef TUNE_BUILD
+    #include <string>
+    #include <vector>
 
-constexpr f64 lmr_base = 0.877806;
-constexpr f64 lmr_divisor = 2.3931;
-constexpr i32 lmr_history_divisor = 3904;
+struct TunableParam
+{
+    std::string name;
+    i32* ptr;
+    i32 min, max;
+};
 
-constexpr i32 history_bonus_max = 401;
-constexpr i32 history_bonus_mult = 1;
+inline std::vector<TunableParam>& tunable_registry()
+{
+    static std::vector<TunableParam> registry;
+    return registry;
+}
 
-constexpr i32 rfp_max_depth = 4;
-constexpr i32 rfp_multiplier = 72;
+struct TunableRegistrar
+{
+    TunableRegistrar(const std::string& name, i32* ptr, i32 value, i32 min, i32 max)
+    {
+        *ptr = value;
+        tunable_registry().push_back({name, ptr, min, max});
+    }
+};
 
-constexpr i32 nmp_min_depth = 3;
-constexpr i32 nmp_base_r = 3;
-constexpr i32 nmp_depth_divisor = 6;
+    #define TUNABLE_PARAM(type, name, value, min, max)                                                                 \
+        inline type name;                                                                                              \
+        inline TunableRegistrar name##_registrar(#name, &name, value, min, max);
+#else
+    #define TUNABLE_PARAM(type, name, value, min, max) constexpr type name = value;
+#endif
 
-constexpr i32 fp_max_depth = 4;
-constexpr i32 fp_multiplier = 155;
+TUNABLE_PARAM(Score, tt_move_score, 17029, 12000, 22000)
+TUNABLE_PARAM(Score, promotion_bonus, 15072, 10000, 20000)
+TUNABLE_PARAM(Score, good_capture, 14395, 12000, 17000)
+TUNABLE_PARAM(Score, killer_score_0, 6547, 4000, 9000)
+TUNABLE_PARAM(Score, killer_score_1, 7489, 5000, 10000)
+TUNABLE_PARAM(Score, countermove_score, 9241, 5000, 13000)
+TUNABLE_PARAM(Score, bad_capture, -8611, -12000, -5000)
 
-constexpr Score delta_margin = 200;
-constexpr i32 iir_min_depth = 4;
-constexpr i32 iir_reduction = 1;
+TUNABLE_PARAM(i32, lmr_base_100, 119, 80, 160)
+TUNABLE_PARAM(i32, lmr_divisor_100, 323, 200, 500)
+TUNABLE_PARAM(i32, lmr_history_divisor, 4321, 3000, 6000)
+
+TUNABLE_PARAM(i32, history_bonus_max, 598, 300, 900)
+TUNABLE_PARAM(i32, history_bonus_mult, 4, 3, 5)
+
+TUNABLE_PARAM(i32, rfp_max_depth, 4, 3, 6)
+TUNABLE_PARAM(i32, rfp_multiplier, 45, 20, 70)
+
+TUNABLE_PARAM(i32, nmp_min_depth, 2, 1, 4)
+TUNABLE_PARAM(i32, nmp_base_r, 2, 1, 5)
+TUNABLE_PARAM(i32, nmp_depth_divisor, 5, 2, 8)
+
+TUNABLE_PARAM(i32, fp_max_depth, 7, 5, 9)
+TUNABLE_PARAM(i32, fp_multiplier, 96, 50, 150)
+
+TUNABLE_PARAM(Score, delta_margin, 41, 0, 300)
+TUNABLE_PARAM(i32, iir_min_depth, 6, 3, 8)
+TUNABLE_PARAM(i32, iir_reduction, 2, 1, 3)
+
+#ifdef TUNE_BUILD
+
+inline void print_optuna_json()
+{
+    std::cout << "{\n";
+    for (usize i = 0; i < Params::tunable_registry().size(); ++i)
+    {
+        const auto& p = Params::tunable_registry()[i];
+
+        std::cout << "  \"" << p.name << "\": {\"default\": " << *p.ptr << ", \"min\": " << p.min
+                  << ", \"max\": " << p.max << ", \"step\": " << 1 << "}";
+
+        if (i < Params::tunable_registry().size() - 1) std::cout << ",";
+        std::cout << "\n";
+    }
+    std::cout << "}\n";
+}
+
+void init_lmr_table();
+#endif
+
 } // namespace Params
 
 inline i64 now_ms()

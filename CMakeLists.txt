@@ -151,3 +151,12 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     )
 
 endif()
+
+# ---------------------------------------------------------
+# Build Options
+# ---------------------------------------------------------
+
+option(TUNE_BUILD "Enable parameter tuning via UCI" OFF)
+if(TUNE_BUILD)
+    target_compile_definitions(philidor PRIVATE TUNE_BUILD)
+endif()

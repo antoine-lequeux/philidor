@@ -27,6 +27,15 @@
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release"
             }
+        },
+        {
+            "name": "release-tune",
+            "inherits": "release",
+            "displayName": "Release build with tuning features",
+            "binaryDir": "${sourceDir}/build/release-tune",
+            "cacheVariables": {
+                "TUNE_BUILD": "ON"
+            }
         }
     ]
 }

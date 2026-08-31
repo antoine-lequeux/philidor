@@ -50,10 +50,10 @@ inline void launch_perft(Board& board, u64 max_depth)
         std::println("{}: {:L}", sm.move.to_uci(), nodes);
     }
     const auto end = std::chrono::steady_clock::now();
-    const std::chrono::duration<double> duration_seconds = end - start;
-    const double seconds = duration_seconds.count();
-    const double milliseconds = duration_seconds.count() * 1000.0;
-    const double nps = static_cast<double>(total) / seconds;
+    const std::chrono::duration<f64> duration_seconds = end - start;
+    const f64 seconds = duration_seconds.count();
+    const f64 milliseconds = duration_seconds.count() * 1000.0;
+    const f64 nps = static_cast<f64>(total) / seconds;
 
     std::println();
     std::println("Nodes searched: {:L}", total);
@@ -68,8 +68,8 @@ inline void launch_enum(Board& board, u64 max_depth)
         const auto start = std::chrono::steady_clock::now();
         u64 nodes = count_nodes(board, d);
         const auto end = std::chrono::steady_clock::now();
-        const std::chrono::duration<double> duration_seconds = end - start;
-        const double milliseconds = duration_seconds.count() * 1000.0;
+        const std::chrono::duration<f64> duration_seconds = end - start;
+        const f64 milliseconds = duration_seconds.count() * 1000.0;
         std::println("Depth: {}, positions: {:L}, time: {:.0f}ms", d, nodes, milliseconds);
     }
 }
@@ -90,11 +90,22 @@ void uci_loop()
 
         const std::string& cmd = tokens[0];
 
+#ifdef TUNE_BUILD
+        if (cmd == "json") Params::print_optuna_json();
+#endif
+
         if (cmd == "uci")
         {
             std::cout << "id name Philidor\n";
             std::cout << "id author Antoine Lequeux\n";
             std::cout << "option name Hash type spin default 64 min 1 max 65536\n";
+#ifdef TUNE_BUILD
+            for (const auto& param : Params::tunable_registry())
+            {
+                std::cout << "option name " << param.name << " type spin default " << *param.ptr << " min " << param.min
+                          << " max " << param.max << "\n";
+            }
+#endif
             std::cout << "uciok\n" << std::flush;
         }
         else if (cmd == "isready")
@@ -103,10 +114,28 @@ void uci_loop()
         }
         else if (cmd == "setoption")
         {
-            if (tokens.size() >= 5 && tokens[1] == "name" && tokens[2] == "Hash" && tokens[3] == "value")
+            if (tokens.size() >= 5 && tokens[1] == "name")
             {
-                usize mb = std::stoull(tokens[4]);
-                tt = std::make_unique<TranspositionTable>(mb);
+                if (tokens[2] == "Hash" && tokens[3] == "value")
+                {
+                    usize mb = std::stoull(tokens[4]);
+                    tt = std::make_unique<TranspositionTable>(mb);
+                }
+#ifdef TUNE_BUILD
+                else if (tokens[3] == "value")
+                {
+                    for (auto& param : Params::tunable_registry())
+                    {
+                        if (tokens[2] == param.name)
+                        {
+                            *param.ptr = std::stoi(tokens[4]);
+                            if (param.name == "lmr_base_100" || param.name == "lmr_divisor_100")
+                                Params::init_lmr_table();
+                            break;
+                        }
+                    }
+                }
+#endif
             }
         }
         else if (cmd == "ucinewgame")
@@ -218,12 +247,17 @@ void uci_loop()
             }
             else if (!infinite && (wtime > 0 || btime > 0))
             {
-                u64 our_time = board.side_to_move == Color::WHITE ? wtime : btime;
-                u64 our_inc = board.side_to_move == Color::WHITE ? winc : binc;
+                u64 our_time = (board.side_to_move == Color::WHITE) ? wtime : btime;
+                u64 our_inc = (board.side_to_move == Color::WHITE) ? winc : binc;
 
-                u64 base = our_time / 30 + (our_inc * 3 / 4);
-                soft_limit_ms = static_cast<i64>(base);
-                hard_limit_ms = static_cast<i64>(std::min(base * 3, our_time >= 50 ? our_time - 50 : 0));
+                constexpr u64 move_overhead = 10;
+                u64 usable_time = (our_time > move_overhead) ? (our_time - move_overhead) : 1;
+
+                u64 base = (usable_time / 30) + (our_inc * 3 / 4);
+
+                soft_limit_ms = static_cast<i64>(std::max<u64>(1, base));
+                hard_limit_ms = static_cast<i64>(std::min<u64>(usable_time, base * 3));
+                hard_limit_ms = std::max<i64>(1, hard_limit_ms);
             }
 
             if (!skip_search)
