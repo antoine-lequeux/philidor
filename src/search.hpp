@@ -37,6 +37,10 @@ constexpr i32 nmp_depth_divisor = 6;
 
 constexpr i32 fp_max_depth = 4;
 constexpr i32 fp_multiplier = 155;
+
+constexpr Score delta_margin = 200;
+constexpr i32 iir_min_depth = 4;
+constexpr i32 iir_reduction = 1;
 } // namespace Params
 
 inline i64 now_ms()

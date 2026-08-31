@@ -318,7 +318,25 @@ Score qsearch(Board& board, Score alpha, Score beta, SearchState& state)
         pick_best(ml, idx);
         if (ml[idx].score < Params::good_capture) break;
 
-        board.make_move(ml[idx].move);
+        Move m = ml[idx].move;
+
+        // Delta Pruning.
+        Score captured_value = 0;
+        if (m.get_flag() == Move::ENPASSANT_CAPTURE_FLAG)
+        {
+            captured_value = see_piece_value(Type::PAWN);
+        }
+        else
+        {
+            Piece victim = board.pieces[m.get_target_square()];
+            if (victim != EMPTY) captured_value = see_piece_value(get_piece_type(victim));
+        }
+
+        if (m.is_promotion()) captured_value += see_piece_value(m.get_promotion_type()) - see_piece_value(Type::PAWN);
+
+        if (stand_pat + captured_value + Params::delta_margin < alpha) continue;
+
+        board.make_move(m);
         state.nodes++;
         Score score = -qsearch(board, -beta, -alpha, state);
         board.unmake_move(ml[idx].move);
@@ -360,6 +378,9 @@ Score negamax(Board& board, i32 depth, i32 ply, Score alpha, Score beta, SearchS
 
     bool in_check = board.in_check();
     Score static_eval = in_check ? 0 : board.evaluate();
+
+    // Internal Iterative Reduction.
+    if (depth >= Params::iir_min_depth && (!tt_entry || tt_entry->move.is_null())) depth -= Params::iir_reduction;
 
     if (!in_check && ply > 0)
     {
