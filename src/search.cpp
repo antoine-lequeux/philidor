@@ -13,6 +13,21 @@ constexpr Score CAPTURE_BONUS = 10000;
 constexpr Score PROMOTION_BONUS = 20000;
 constexpr Score TT_MOVE_SCORE = 30000;
 
+#include <cmath>
+
+static i32 LMR_TABLE[64][64];
+static bool LMR_INIT = []() {
+    for (i32 d = 1; d < 64; d++)
+    {
+        for (i32 m = 1; m < 64; m++)
+        {
+            LMR_TABLE[d][m] = static_cast<i32>(0.75 + std::log(d) * std::log(m) / 2.25);
+            if (LMR_TABLE[d][m] < 0) LMR_TABLE[d][m] = 0;
+        }
+    }
+    return true;
+}();
+
 // clang-format off
 constexpr i32 MVV_LVA[7][7] = {{0, 0, 0, 0, 0, 0, 0},       
 {                               0, 15, 14, 13, 12, 11, 10}, // Victim PAWN
@@ -145,23 +160,30 @@ Score negamax(Board& board, i32 depth, i32 ply, Score alpha, Score beta, SearchS
     if (depth <= 0) return qsearch(board, alpha, beta, state);
 
     bool in_check = board.in_check();
+    Score static_eval = in_check ? 0 : board.evaluate();
 
-    if (!in_check && ply > 0 && depth >= 3)
+    if (!in_check && ply > 0)
     {
-        bool prev_was_null = board.history[board.ply - 1].move.is_null();
-        if (!prev_was_null && board.has_non_pawn_material(board.side_to_move))
+        // Reverse Futility Pruning.
+        if (depth <= 5 && static_eval - depth * 75 >= beta) return static_eval;
+
+        // Null Move Pruning.
+        if (depth >= 3)
         {
-            Score eval = board.evaluate();
-            if (eval >= beta)
+            bool prev_was_null = board.history[board.ply - 1].move.is_null();
+            if (!prev_was_null && board.has_non_pawn_material(board.side_to_move))
             {
-                i32 R = 3 + depth / 6;
-                board.make_null();
-                Score null_score = -negamax(board, depth - 1 - R, ply + 1, -beta, -beta + 1, state);
-                board.unmake_null();
+                if (static_eval >= beta)
+                {
+                    i32 R = 3 + depth / 6;
+                    board.make_null();
+                    Score null_score = -negamax(board, depth - 1 - R, ply + 1, -beta, -beta + 1, state);
+                    board.unmake_null();
 
-                if (state.stop && state.stop->load(std::memory_order_relaxed)) return 0;
+                    if (state.stop && state.stop->load(std::memory_order_relaxed)) return 0;
 
-                if (null_score >= beta) return null_score >= MATE_THRESHOLD ? beta : null_score;
+                    if (null_score >= beta) return null_score >= MATE_THRESHOLD ? beta : null_score;
+                }
             }
         }
     }
@@ -177,13 +199,54 @@ Score negamax(Board& board, i32 depth, i32 ply, Score alpha, Score beta, SearchS
 
     int moves_played = 0;
 
+    bool do_futility_pruning = !in_check && depth <= 4 && static_eval + depth * 150 <= alpha;
+
     for (usize idx = 0; idx < ml.size(); ++idx)
     {
         pick_best(ml, idx);
         Move m = ml[idx].move;
+
+        bool is_quiet = !m.is_capture() && !m.is_promotion();
+
+        // Futility Pruning.
+        if (do_futility_pruning && is_quiet && moves_played > 0 && best_score > -MATE_THRESHOLD) continue;
+
         board.make_move(m);
 
-        Score score = -negamax(board, depth - 1, ply + 1, -beta, -alpha, state);
+        // Check Extension.
+        i32 extension = board.in_check() ? 1 : 0;
+        i32 new_depth = depth - 1 + extension;
+
+        Score score;
+
+        if (moves_played == 0)
+        {
+            // Full-depth full-window for first move.
+            score = -negamax(board, new_depth, ply + 1, -beta, -alpha, state);
+        }
+        else
+        {
+            // Late Move Reductions.
+            if (depth >= 3 && moves_played >= 3 && is_quiet && !in_check)
+            {
+                i32 R = LMR_TABLE[std::min(depth, 63)][std::min(moves_played, 63)];
+
+                // Reduced-depth zero-window search
+                score = -negamax(board, new_depth - R, ply + 1, -alpha - 1, -alpha, state);
+            }
+            else
+            {
+                // Force a full-depth zero-window search.
+                score = alpha + 1;
+            }
+
+            // Full-depth zero-window search.
+            if (score > alpha) score = -negamax(board, new_depth, ply + 1, -alpha - 1, -alpha, state);
+
+            // Full-depth full-window re-search (only if score is inside window).
+            if (score > alpha && score < beta) score = -negamax(board, new_depth, ply + 1, -beta, -alpha, state);
+        }
+
         board.unmake_move(m);
 
         if (state.stop && state.stop->load(std::memory_order_relaxed)) return 0;
@@ -238,6 +301,7 @@ RootResult search_root(Board& board, i32 depth, Score alpha, Score beta, SearchS
     Score best_score = -INF;
     Move best_move {};
     Bound bound = Bound::UPPER;
+    int moves_played = 0;
 
     for (usize idx = 0; idx < ml.size(); ++idx)
     {
@@ -245,10 +309,26 @@ RootResult search_root(Board& board, i32 depth, Score alpha, Score beta, SearchS
         Move m = ml[idx].move;
         board.make_move(m);
 
-        Score score = -negamax(board, depth - 1, 1, -beta, -alpha, state);
+        Score score;
+
+        if (moves_played == 0)
+        {
+            score = -negamax(board, depth - 1, 1, -beta, -alpha, state);
+        }
+        else
+        {
+            // PVS (zero-window search first).
+            score = -negamax(board, depth - 1, 1, -alpha - 1, -alpha, state);
+
+            // Re-search with full window if score is inside the window.
+            if (score > alpha && score < beta) score = -negamax(board, depth - 1, 1, -beta, -alpha, state);
+        }
+
         board.unmake_move(m);
 
         if (state.stop && state.stop->load(std::memory_order_relaxed)) return result;
+
+        moves_played++;
 
         if (score > best_score)
         {
