@@ -368,7 +368,10 @@ Score qsearch(Board& board, Score alpha, Score beta, SearchState& state)
     return alpha;
 }
 
-Score negamax(Board& board, i32 depth, i32 ply, Score alpha, Score beta, SearchState& state)
+Score negamax(
+    Board& board, i32 depth, i32 ply, Score alpha, Score beta, SearchState& state, Move excluded_move = Move {},
+    i32 double_ext = 0
+)
 {
     if (state.time_up()) return 0;
 
@@ -381,7 +384,7 @@ Score negamax(Board& board, i32 depth, i32 ply, Score alpha, Score beta, SearchS
     u64 hash = board.zobrist_key();
 
     std::optional<TTEntry> tt_entry = state.tt->probe(hash, ply);
-    if (tt_entry)
+    if (tt_entry && !excluded_move.is_some())
     {
         if (ply > 0 && tt_entry->depth >= depth)
         {
@@ -398,9 +401,10 @@ Score negamax(Board& board, i32 depth, i32 ply, Score alpha, Score beta, SearchS
     Score static_eval = in_check ? 0 : board.evaluate();
 
     // Internal Iterative Reduction.
-    if (depth >= Params::iir_min_depth && (!tt_entry || tt_entry->move.is_null())) depth -= Params::iir_reduction;
+    if (!excluded_move.is_some() && depth >= Params::iir_min_depth && (!tt_entry || tt_entry->move.is_null()))
+        depth -= Params::iir_reduction;
 
-    if (!in_check && ply > 0)
+    if (!in_check && ply > 0 && !excluded_move.is_some())
     {
         // Reverse Futility Pruning.
         if (depth <= Params::rfp_max_depth && static_eval - depth * Params::rfp_multiplier >= beta) return static_eval;
@@ -429,6 +433,21 @@ Score negamax(Board& board, i32 depth, i32 ply, Score alpha, Score beta, SearchS
     Move prev_move = (ply > 0) ? board.history[board.ply - 1].move : Move {};
 
     Move tt_move = tt_entry ? tt_entry->move : Move {};
+    bool tt_is_singular = false;
+
+    // Singular Extensions.
+    if (!excluded_move.is_some() && depth >= Params::se_min_depth && tt_entry && tt_move.is_some() && ply > 0)
+    {
+        if (tt_entry->depth >= depth - Params::se_depth_reduction && tt_entry->get_bound() != Bound::UPPER)
+        {
+            Score tt_score = tt_entry->score;
+            Score se_beta = std::max(-MATE_VALUE, tt_score - Params::se_margin);
+            i32 se_depth = depth - Params::se_depth_reduction;
+
+            Score se_score = negamax(board, se_depth, ply, se_beta - 1, se_beta, state, tt_move);
+            if (se_score < se_beta) tt_is_singular = true;
+        }
+    }
 
     MoveList ml = board.generate_moves<GenType::ALL>();
     score_moves(board, ml, tt_move, state, ply, prev_move);
@@ -450,7 +469,16 @@ Score negamax(Board& board, i32 depth, i32 ply, Score alpha, Score beta, SearchS
         pick_best(ml, idx);
         Move m = ml[idx].move;
 
+        if (m == excluded_move) continue;
+
         bool is_quiet = !m.is_capture() && !m.is_promotion();
+
+        // Late Move Pruning.
+        if (!in_check && depth <= Params::lmp_max_depth && is_quiet)
+        {
+            i32 lmp_threshold = Params::lmp_base + (depth * depth * Params::lmp_multiplier) / 10;
+            if (moves_played >= lmp_threshold) continue;
+        }
 
         // Futility Pruning.
         if (do_futility_pruning && is_quiet && moves_played > 0 && best_score > -MATE_THRESHOLD) continue;
@@ -459,6 +487,17 @@ Score negamax(Board& board, i32 depth, i32 ply, Score alpha, Score beta, SearchS
 
         // Check Extension.
         i32 extension = board.in_check() ? 1 : 0;
+        i32 next_double_ext = double_ext;
+
+        if (tt_is_singular && m == tt_move)
+        {
+            if (extension == 0 && double_ext < Params::se_double_ext_cap)
+            {
+                extension = Params::se_extension;
+                next_double_ext++;
+            }
+        }
+
         i32 new_depth = depth - 1 + extension;
 
         Score score;
@@ -466,7 +505,7 @@ Score negamax(Board& board, i32 depth, i32 ply, Score alpha, Score beta, SearchS
         if (moves_played == 0)
         {
             // Full-depth full-window for first move.
-            score = -negamax(board, new_depth, ply + 1, -beta, -alpha, state);
+            score = -negamax(board, new_depth, ply + 1, -beta, -alpha, state, Move {}, next_double_ext);
         }
         else
         {
@@ -489,7 +528,7 @@ Score negamax(Board& board, i32 depth, i32 ply, Score alpha, Score beta, SearchS
 
                 R = std::clamp(R, 0, new_depth - 1);
 
-                score = -negamax(board, new_depth - R, ply + 1, -alpha - 1, -alpha, state);
+                score = -negamax(board, new_depth - R, ply + 1, -alpha - 1, -alpha, state, Move {}, next_double_ext);
             }
             else
             {
@@ -498,10 +537,12 @@ Score negamax(Board& board, i32 depth, i32 ply, Score alpha, Score beta, SearchS
             }
 
             // Full-depth zero-window search.
-            if (score > alpha) score = -negamax(board, new_depth, ply + 1, -alpha - 1, -alpha, state);
+            if (score > alpha)
+                score = -negamax(board, new_depth, ply + 1, -alpha - 1, -alpha, state, Move {}, next_double_ext);
 
             // Full-depth full-window re-search (only if score is inside window).
-            if (score > alpha && score < beta) score = -negamax(board, new_depth, ply + 1, -beta, -alpha, state);
+            if (score > alpha && score < beta)
+                score = -negamax(board, new_depth, ply + 1, -beta, -alpha, state, Move {}, next_double_ext);
         }
 
         board.unmake_move(m);
