@@ -17,9 +17,9 @@
 static std::atomic_bool stop_search {false};
 static std::thread search_thread;
 
-static void run_search(Board board, i32 max_depth, i64 hard_limit_ms, i64 soft_limit_ms, TranspositionTable* tt)
+static void run_search(Board board, i32 max_depth, i64 hard_limit_ms, i64 soft_limit_ms, SearchState* state)
 {
-    iterative_deepening(board, max_depth, hard_limit_ms, soft_limit_ms, tt, &stop_search);
+    iterative_deepening(board, max_depth, hard_limit_ms, soft_limit_ms, state);
 }
 
 inline u64 count_nodes(Board& board, u64 depth)
@@ -78,6 +78,9 @@ void uci_loop()
 {
     Board board = Board::from_startpos();
     auto tt = std::make_unique<TranspositionTable>(64);
+    auto main_state = std::make_unique<SearchState>();
+    main_state->tt = tt.get();
+    main_state->stop = &stop_search;
 
     std::string line;
     while (std::getline(std::cin, line))
@@ -120,6 +123,7 @@ void uci_loop()
                 {
                     usize mb = std::stoull(tokens[4]);
                     tt = std::make_unique<TranspositionTable>(mb);
+                    main_state->tt = tt.get();
                 }
 #ifdef TUNE_BUILD
                 else if (tokens[3] == "value")
@@ -141,6 +145,7 @@ void uci_loop()
         else if (cmd == "ucinewgame")
         {
             tt->clear();
+            main_state->clear_heuristics();
             board = Board::from_startpos();
         }
         else if (cmd == "position")
@@ -261,7 +266,8 @@ void uci_loop()
             }
 
             if (!skip_search)
-                search_thread = std::thread(run_search, board, max_depth, hard_limit_ms, soft_limit_ms, tt.get());
+                search_thread =
+                    std::thread(run_search, board, max_depth, hard_limit_ms, soft_limit_ms, main_state.get());
         }
         else if (cmd == "stop")
         {

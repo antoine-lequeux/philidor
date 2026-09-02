@@ -13,4 +13,5 @@ u64 get_ep_key(Square sq);
 u64 get_side_key();
 
 u64 compute_hash(const Board& board);
+u64 compute_pawn_hash(const Board& board);
 } // namespace zobrist

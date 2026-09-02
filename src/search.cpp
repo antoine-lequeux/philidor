@@ -1,6 +1,8 @@
 #include "search.hpp"
+#include "board.hpp"
 #include "defines.hpp"
 #include "magic.hpp"
+#include "zobrist.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -400,14 +402,45 @@ Score negamax(
     bool in_check = board.in_check();
     Score static_eval = in_check ? 0 : board.evaluate();
 
+    u64 pawn_hash = 0;
+    i16* ch_entry = nullptr;
+    if (!in_check)
+    {
+        pawn_hash = zobrist::compute_pawn_hash(board);
+        ch_entry = &state.correction_history[color_index(board.side_to_move)][pawn_hash % 16384];
+        static_eval = std::clamp<Score>(static_eval + *ch_entry, -MATE_VALUE, MATE_VALUE);
+    }
+
     // Internal Iterative Reduction.
     if (!excluded_move.is_some() && depth >= Params::iir_min_depth && (!tt_entry || tt_entry->move.is_null()))
         depth -= Params::iir_reduction;
 
     if (!in_check && ply > 0 && !excluded_move.is_some())
     {
+        // Razoring.
+        if (depth <= Params::razoring_max_depth && static_eval + Params::razoring_margin * depth <= alpha)
+        {
+            Score r_score = qsearch(board, alpha, beta, state);
+            if (r_score <= alpha) return r_score;
+        }
+
         // Reverse Futility Pruning.
         if (depth <= Params::rfp_max_depth && static_eval - depth * Params::rfp_multiplier >= beta) return static_eval;
+
+        // ProbCut.
+        if (depth >= Params::pc_min_depth && std::abs(beta) < MATE_THRESHOLD && static_eval + Params::pc_margin >= beta)
+        {
+            Score pc_beta = beta + Params::pc_margin;
+            i32 pc_depth = depth - Params::pc_depth_reduction;
+
+            Score pc_score;
+            if (pc_depth <= 0)
+                pc_score = qsearch(board, pc_beta - 1, pc_beta, state);
+            else
+                pc_score = negamax(board, pc_depth, ply, pc_beta - 1, pc_beta, state);
+
+            if (pc_score >= pc_beta) return pc_beta;
+        }
 
         // Null Move Pruning.
         if (depth >= Params::nmp_min_depth)
@@ -510,7 +543,7 @@ Score negamax(
         else
         {
             // Late Move Reductions.
-            if (depth >= 3 && moves_played >= 3 && is_quiet && !in_check)
+            if (depth >= 3 && moves_played >= 3 && is_quiet && !in_check && extension == 0)
             {
                 i32 R = LMR_TABLE[std::min(depth, 63)][std::min(moves_played, 63)];
 
@@ -584,6 +617,27 @@ Score negamax(
     }
 
     state.tt->store(hash, depth, ply, best_score, bound, best_move);
+
+    // Correction history update.
+    if (ch_entry && depth >= 1 && !excluded_move.is_some() && std::abs(best_score) < MATE_THRESHOLD)
+    {
+        Score uncorrected = static_eval - *ch_entry;
+        bool update = false;
+
+        if (bound == Bound::EXACT)
+            update = true;
+        else if (bound == Bound::LOWER && best_score > uncorrected)
+            update = true;
+        else if (bound == Bound::UPPER && best_score < uncorrected)
+            update = true;
+
+        if (update)
+        {
+            Score diff = best_score - uncorrected;
+            i32 weight = Params::ch_weight * 32;
+            *ch_entry = static_cast<i16>(std::clamp<i32>(*ch_entry + diff / weight, -Params::ch_cap, Params::ch_cap));
+        }
+    }
 
     return best_score;
 }
