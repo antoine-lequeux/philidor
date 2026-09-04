@@ -280,11 +280,13 @@ void Board::make_null()
     State& current_state = history[ply];
     State& next_state = history[ply + 1];
 
+    current_state.move = Move();
+    current_state.moved_piece = EMPTY;
+    current_state.captured_piece = EMPTY;
+
     next_state = current_state;
     next_state.ep_square = NO_SQUARE;
     next_state.halfmove_clock++;
-    next_state.moved_piece = EMPTY;
-    next_state.captured_piece = EMPTY;
 
     u64 hash = current_state.hash;
     if (current_state.ep_square != NO_SQUARE) hash ^= zobrist::get_ep_key(current_state.ep_square);

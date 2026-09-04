@@ -181,6 +181,9 @@ score_moves(const Board& board, MoveList& ml, Move tt_move, const SearchState& s
 
             sm.score = MVV_LVA[static_cast<usize>(v_type)][static_cast<usize>(a_type)];
 
+            // Capture history bonus.
+            sm.score += state.capture_history[attacker][to][static_cast<usize>(v_type)];
+
             if (see_ge(board, m, 0))
                 sm.score += Params::good_capture;
             else
@@ -244,6 +247,31 @@ inline void update_cont_history(i16& entry, i32 bonus)
     i32 val = static_cast<i32>(entry);
     val += bonus - val * std::abs(bonus) / CONT_MAX;
     entry = static_cast<i16>(std::clamp(val, -CONT_MAX, CONT_MAX));
+}
+
+inline void update_capture_stats(
+    SearchState& state, const Board& board, Move best_move, i32 depth, Move* searched_captures, i32 capture_count
+)
+{
+    i32 bonus = std::min(depth * depth * Params::capture_history_bonus_mult, Params::capture_history_bonus_max);
+
+    // Malus for captures that didn't cause cutoff.
+    for (i32 i = 0; i < capture_count; i++)
+    {
+        Move m = searched_captures[i];
+
+        Square to = m.get_target_square();
+        Piece attacker = board.pieces[m.get_start_square()];
+        Piece victim = board.pieces[to];
+        Type v_type = (victim == EMPTY) ? Type::PAWN : get_piece_type(victim);
+
+        i16& entry = state.capture_history[attacker][to][static_cast<usize>(v_type)];
+
+        if (m == best_move)
+            update_cont_history(entry, bonus);
+        else
+            update_cont_history(entry, -bonus);
+    }
 }
 
 inline void update_quiet_stats(
@@ -321,17 +349,38 @@ inline void update_quiet_stats(
     }
 }
 
-Score qsearch(Board& board, Score alpha, Score beta, SearchState& state)
+inline Score get_static_eval(const Board& board, const SearchState& state, Move prev_move)
+{
+    Score eval = board.evaluate();
+
+    u64 pawn_hash = zobrist::compute_pawn_hash(board);
+    i16 ch = state.correction_history[color_index(board.side_to_move)][pawn_hash % 16384];
+    eval = std::clamp<Score>(eval + ch, -MATE_VALUE, MATE_VALUE);
+
+    if (prev_move.is_some())
+    {
+        usize opp = color_index(!board.side_to_move);
+        i32 hist = state.history[opp][prev_move.from_to_index()];
+        Score stat_bonus = std::clamp<Score>(
+            hist / Params::statscore_divisor, -Params::statscore_max_bonus, Params::statscore_max_bonus
+        );
+        eval = std::clamp<Score>(eval - stat_bonus, -MATE_VALUE, MATE_VALUE);
+    }
+    return eval;
+}
+
+Score qsearch(Board& board, Score alpha, Score beta, SearchState& state, Move prev_move = Move {})
 {
     if (state.time_up()) return 0;
 
-    Score stand_pat = board.evaluate();
+    bool in_check = board.in_check();
+    Score stand_pat = get_static_eval(board, state, prev_move);
 
     if (stand_pat >= beta) return beta;
     if (alpha < stand_pat) alpha = stand_pat;
 
     MoveList ml = board.generate_moves<GenType::CAPTURES>();
-    score_moves(board, ml, Move {}, state, 0, Move {});
+    score_moves(board, ml, Move {}, state, 0, prev_move);
 
     for (usize idx = 0; idx < ml.size(); ++idx)
     {
@@ -341,24 +390,28 @@ Score qsearch(Board& board, Score alpha, Score beta, SearchState& state)
         Move m = ml[idx].move;
 
         // Delta Pruning.
-        Score captured_value = 0;
-        if (m.get_flag() == Move::ENPASSANT_CAPTURE_FLAG)
+        if (!in_check)
         {
-            captured_value = see_piece_value(Type::PAWN);
-        }
-        else
-        {
-            Piece victim = board.pieces[m.get_target_square()];
-            if (victim != EMPTY) captured_value = see_piece_value(get_piece_type(victim));
-        }
+            Score captured_value = 0;
+            if (m.get_flag() == Move::ENPASSANT_CAPTURE_FLAG)
+            {
+                captured_value = see_piece_value(Type::PAWN);
+            }
+            else
+            {
+                Piece victim = board.pieces[m.get_target_square()];
+                if (victim != EMPTY) captured_value = see_piece_value(get_piece_type(victim));
+            }
 
-        if (m.is_promotion()) captured_value += see_piece_value(m.get_promotion_type()) - see_piece_value(Type::PAWN);
+            if (m.is_promotion())
+                captured_value += see_piece_value(m.get_promotion_type()) - see_piece_value(Type::PAWN);
 
-        if (stand_pat + captured_value + Params::delta_margin < alpha) continue;
+            if (stand_pat + captured_value + Params::delta_margin < alpha) continue;
+        }
 
         board.make_move(m);
         state.nodes++;
-        Score score = -qsearch(board, -beta, -alpha, state);
+        Score score = -qsearch(board, -beta, -alpha, state, m);
         board.unmake_move(ml[idx].move);
 
         if (state.stop && state.stop->load(std::memory_order_relaxed)) return 0;
@@ -399,17 +452,20 @@ Score negamax(
 
     if (depth <= 0) return qsearch(board, alpha, beta, state);
 
+    Move prev_move = board.ply > 0 ? board.history[board.ply - 1].move : Move {};
     bool in_check = board.in_check();
-    Score static_eval = in_check ? 0 : board.evaluate();
+    Score static_eval = in_check ? 0 : get_static_eval(board, state, prev_move);
+    state.evals[ply] = static_eval;
 
-    u64 pawn_hash = 0;
     i16* ch_entry = nullptr;
     if (!in_check)
     {
-        pawn_hash = zobrist::compute_pawn_hash(board);
+        u64 pawn_hash = zobrist::compute_pawn_hash(board);
         ch_entry = &state.correction_history[color_index(board.side_to_move)][pawn_hash % 16384];
-        static_eval = std::clamp<Score>(static_eval + *ch_entry, -MATE_VALUE, MATE_VALUE);
     }
+
+    bool improving = false;
+    if (ply >= 2 && !in_check) improving = (static_eval >= state.evals[ply - 2]);
 
     // Internal Iterative Reduction.
     if (!excluded_move.is_some() && depth >= Params::iir_min_depth && (!tt_entry || tt_entry->move.is_null()))
@@ -420,12 +476,17 @@ Score negamax(
         // Razoring.
         if (depth <= Params::razoring_max_depth && static_eval + Params::razoring_margin * depth <= alpha)
         {
-            Score r_score = qsearch(board, alpha, beta, state);
+            Score r_score = qsearch(board, alpha, beta, state, prev_move);
             if (r_score <= alpha) return r_score;
         }
 
         // Reverse Futility Pruning.
-        if (depth <= Params::rfp_max_depth && static_eval - depth * Params::rfp_multiplier >= beta) return static_eval;
+        if (depth <= Params::rfp_max_depth)
+        {
+            Score rfp_margin = depth * Params::rfp_multiplier;
+            if (improving) rfp_margin -= Params::rfp_improving_margin_bonus;
+            if (static_eval - rfp_margin >= beta) return static_eval;
+        }
 
         // ProbCut.
         if (depth >= Params::pc_min_depth && std::abs(beta) < MATE_THRESHOLD && static_eval + Params::pc_margin >= beta)
@@ -435,7 +496,7 @@ Score negamax(
 
             Score pc_score;
             if (pc_depth <= 0)
-                pc_score = qsearch(board, pc_beta - 1, pc_beta, state);
+                pc_score = qsearch(board, pc_beta - 1, pc_beta, state, prev_move);
             else
                 pc_score = negamax(board, pc_depth, ply, pc_beta - 1, pc_beta, state);
 
@@ -463,8 +524,6 @@ Score negamax(
         }
     }
 
-    Move prev_move = (ply > 0) ? board.history[board.ply - 1].move : Move {};
-
     Move tt_move = tt_entry ? tt_entry->move : Move {};
     bool tt_is_singular = false;
 
@@ -491,11 +550,19 @@ Score negamax(
 
     i32 moves_played = 0;
 
-    bool do_futility_pruning =
-        !in_check && depth <= Params::fp_max_depth && static_eval + depth * Params::fp_multiplier <= alpha;
+    bool do_futility_pruning = false;
+    if (!in_check && depth <= Params::fp_max_depth && std::abs(alpha) < MATE_THRESHOLD)
+    {
+        Score fp_margin = depth * Params::fp_multiplier;
+        if (improving) fp_margin -= Params::fp_improving_margin_bonus;
+        if (static_eval + fp_margin <= alpha) do_futility_pruning = true;
+    }
 
     Move searched_quiets[64];
     i32 quiet_count = 0;
+
+    Move searched_captures[64];
+    i32 capture_count = 0;
 
     for (usize idx = 0; idx < ml.size(); ++idx)
     {
@@ -505,6 +572,13 @@ Score negamax(
         if (m == excluded_move) continue;
 
         bool is_quiet = !m.is_capture() && !m.is_promotion();
+
+        // SEE Pruning.
+        if (best_score > -MATE_THRESHOLD && depth <= Params::see_pruning_max_depth && m != tt_move)
+        {
+            if (!is_quiet && !see_ge(board, m, Params::see_capture_margin * depth)) continue;
+            if (is_quiet && !see_ge(board, m, Params::see_quiet_margin * depth)) continue;
+        }
 
         // Late Move Pruning.
         if (!in_check && depth <= Params::lmp_max_depth && is_quiet)
@@ -522,12 +596,29 @@ Score negamax(
         i32 extension = board.in_check() ? 1 : 0;
         i32 next_double_ext = double_ext;
 
-        if (tt_is_singular && m == tt_move)
+        if (m == tt_move)
         {
-            if (extension == 0 && double_ext < Params::se_double_ext_cap)
+            if (tt_is_singular)
             {
-                extension = Params::se_extension;
-                next_double_ext++;
+                if (extension == 0 && double_ext < Params::se_double_ext_cap)
+                {
+                    extension = Params::se_extension;
+                    next_double_ext++;
+                }
+                else if (extension > 0)
+                {
+                    // Double extension if checking and singular.
+                    if (double_ext < Params::se_double_ext_cap && std::abs(static_eval) < Params::se_double_ext_margin)
+                    {
+                        extension += 1;
+                        next_double_ext++;
+                    }
+                }
+            }
+            else if (depth >= Params::se_min_depth && !excluded_move.is_some())
+            {
+                // Negative extension (TT move was tested but is not singular).
+                extension -= Params::se_negative_extension_depth;
             }
         }
 
@@ -546,6 +637,8 @@ Score negamax(
             if (depth >= 3 && moves_played >= 3 && is_quiet && !in_check && extension == 0)
             {
                 i32 R = LMR_TABLE[std::min(depth, 63)][std::min(moves_played, 63)];
+
+                if (improving) R -= Params::lmr_improving_reduction;
 
                 // Reduce less for killers and countermoves.
                 if (m == state.killers[ply][0] || m == state.killers[ply][1]) R -= 1;
@@ -583,6 +676,7 @@ Score negamax(
         if (state.stop && state.stop->load(std::memory_order_relaxed)) return 0;
 
         if (is_quiet && quiet_count < 64) searched_quiets[quiet_count++] = m;
+        if (m.is_capture() && capture_count < 64) searched_captures[capture_count++] = m;
 
         moves_played++;
 
@@ -602,7 +696,10 @@ Score negamax(
         {
             bound = Bound::LOWER;
 
-            if (is_quiet) update_quiet_stats(state, board, m, depth, ply, prev_move, searched_quiets, quiet_count);
+            if (is_quiet)
+                update_quiet_stats(state, board, m, depth, ply, prev_move, searched_quiets, quiet_count);
+            else if (m.is_capture())
+                update_capture_stats(state, board, m, depth, searched_captures, capture_count);
 
             break;
         }

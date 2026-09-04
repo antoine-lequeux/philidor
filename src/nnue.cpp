@@ -64,7 +64,8 @@ Score NNUE::evaluate(usize color, u32 ply) const
     compute_layer<i16, true>(o2, o3, network.b3, network.w3, ARCH[L3][ROW], ARCH[L3][COL]);
     compute_layer<i32, false>(o3, o4, network.b4, network.w4, ARCH[L4][ROW], ARCH[L4][COL]);
 
-    return (o4[0] * 120) / nnue_constants::QUANT_FACTOR_B;
+    Score eval = (o4[0] * 120) / nnue_constants::QUANT_FACTOR_B;
+    return std::clamp(eval, -MATE_THRESHOLD + 1, MATE_THRESHOLD - 1);
 }
 
 void NNUE::inputs_full_update(u32 ply, const std::array<Piece, 64>& pieces, const std::array<Square, 2>& kings)

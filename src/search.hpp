@@ -45,54 +45,68 @@ struct TunableRegistrar
     #define TUNABLE_PARAM(type, name, value, min, max) constexpr type name = value;
 #endif
 
-TUNABLE_PARAM(Score, tt_move_score, 19302, 12000, 22000)
-TUNABLE_PARAM(Score, promotion_bonus, 14918, 10000, 20000)
-TUNABLE_PARAM(Score, good_capture, 14472, 12000, 17000)
-TUNABLE_PARAM(Score, killer_score_0, 7733, 4000, 9000)
-TUNABLE_PARAM(Score, killer_score_1, 6527, 5000, 10000)
-TUNABLE_PARAM(Score, countermove_score, 10642, 5000, 13000)
-TUNABLE_PARAM(Score, bad_capture, -10634, -12000, -5000)
+TUNABLE_PARAM(Score, tt_move_score, 20000, 10000, 30000)
+TUNABLE_PARAM(Score, promotion_bonus, 15000, 5000, 20000)
+TUNABLE_PARAM(Score, good_capture, 12000, 8000, 18000)
+TUNABLE_PARAM(Score, killer_score_0, 8000, 4000, 12000)
+TUNABLE_PARAM(Score, killer_score_1, 7000, 3000, 10000)
+TUNABLE_PARAM(Score, countermove_score, 6000, 3000, 10000)
+TUNABLE_PARAM(Score, bad_capture, -5000, -10000, -1000)
 
-TUNABLE_PARAM(i32, lmr_base_100, 138, 80, 160)
-TUNABLE_PARAM(i32, lmr_divisor_100, 281, 200, 500)
-TUNABLE_PARAM(i32, lmr_history_divisor, 3279, 2000, 6000)
+TUNABLE_PARAM(i32, lmr_base_100, 75, 40, 150)
+TUNABLE_PARAM(i32, lmr_divisor_100, 225, 150, 400)
+TUNABLE_PARAM(i32, lmr_history_divisor, 4000, 2000, 8000)
+TUNABLE_PARAM(i32, lmr_improving_reduction, 1, -2, 2)
 
-TUNABLE_PARAM(i32, history_bonus_max, 413, 300, 900)
-TUNABLE_PARAM(i32, history_bonus_mult, 4, 2, 7)
+TUNABLE_PARAM(i32, history_bonus_max, 400, 200, 1000)
+TUNABLE_PARAM(i32, history_bonus_mult, 4, 1, 8)
+TUNABLE_PARAM(i32, statscore_divisor, 120, 50, 400)
+TUNABLE_PARAM(Score, statscore_max_bonus, 100, 50, 400)
 
-TUNABLE_PARAM(i32, rfp_max_depth, 5, 2, 7)
-TUNABLE_PARAM(i32, rfp_multiplier, 37, 20, 70)
+TUNABLE_PARAM(i32, capture_history_bonus_max, 300, 100, 1000)
+TUNABLE_PARAM(i32, capture_history_bonus_mult, 4, 1, 10)
 
-TUNABLE_PARAM(i32, nmp_min_depth, 2, 1, 4)
-TUNABLE_PARAM(i32, nmp_base_r, 2, 1, 8)
-TUNABLE_PARAM(i32, nmp_depth_divisor, 3, 2, 8)
+TUNABLE_PARAM(i32, rfp_max_depth, 7, 3, 9)
+TUNABLE_PARAM(i32, rfp_multiplier, 75, 30, 120)
+TUNABLE_PARAM(Score, rfp_improving_margin_bonus, 50, -100, 200)
 
-TUNABLE_PARAM(i32, fp_max_depth, 5, 2, 9)
-TUNABLE_PARAM(i32, fp_multiplier, 63, 30, 150)
+TUNABLE_PARAM(i32, nmp_min_depth, 3, 1, 5)
+TUNABLE_PARAM(i32, nmp_base_r, 3, 1, 6)
+TUNABLE_PARAM(i32, nmp_depth_divisor, 4, 2, 8)
 
-TUNABLE_PARAM(Score, delta_margin, 243, 0, 300)
-TUNABLE_PARAM(i32, iir_min_depth, 3, 1, 8)
+TUNABLE_PARAM(i32, fp_max_depth, 6, 3, 9)
+TUNABLE_PARAM(i32, fp_multiplier, 120, 50, 200)
+TUNABLE_PARAM(Score, fp_improving_margin_bonus, 50, -100, 200)
+
+TUNABLE_PARAM(Score, delta_margin, 200, 0, 400)
+TUNABLE_PARAM(i32, iir_min_depth, 4, 2, 8)
 TUNABLE_PARAM(i32, iir_reduction, 1, 1, 3)
 
-TUNABLE_PARAM(i32, lmp_max_depth, 3, 1, 10)
-TUNABLE_PARAM(i32, lmp_base, 7, 0, 10)
-TUNABLE_PARAM(i32, lmp_multiplier, 16, 0, 20)
+TUNABLE_PARAM(i32, lmp_max_depth, 8, 3, 12)
+TUNABLE_PARAM(i32, lmp_base, 3, 1, 10)
+TUNABLE_PARAM(i32, lmp_multiplier, 15, 5, 30)
 
-TUNABLE_PARAM(i32, se_min_depth, 5, 3, 12)
-TUNABLE_PARAM(i32, se_depth_reduction, 5, 1, 7)
-TUNABLE_PARAM(Score, se_margin, 16, 0, 100)
+TUNABLE_PARAM(i32, se_min_depth, 8, 4, 12)
+TUNABLE_PARAM(i32, se_depth_reduction, 4, 2, 8)
+TUNABLE_PARAM(Score, se_margin, 20, 0, 80)
 TUNABLE_PARAM(i32, se_extension, 1, 1, 3)
-TUNABLE_PARAM(i32, se_double_ext_cap, 2, 1, 8)
+TUNABLE_PARAM(i32, se_double_ext_cap, 3, 1, 5)
+TUNABLE_PARAM(i32, se_negative_extension_depth, 1, 0, 3)
+TUNABLE_PARAM(Score, se_double_ext_margin, 20, 0, 100)
 
-TUNABLE_PARAM(i32, pc_min_depth, 6, 2, 8)
-TUNABLE_PARAM(i32, pc_depth_reduction, 5, 1, 8)
-TUNABLE_PARAM(Score, pc_margin, 302, 50, 400)
+TUNABLE_PARAM(i32, pc_min_depth, 5, 3, 9)
+TUNABLE_PARAM(i32, pc_depth_reduction, 4, 2, 8)
+TUNABLE_PARAM(Score, pc_margin, 200, 100, 400)
 
-TUNABLE_PARAM(i32, razoring_max_depth, 5, 1, 5)
-TUNABLE_PARAM(Score, razoring_margin, 365, 20, 500)
+TUNABLE_PARAM(i32, razoring_max_depth, 3, 1, 6)
+TUNABLE_PARAM(Score, razoring_margin, 200, 50, 400)
 
-TUNABLE_PARAM(i32, ch_weight, 16, 1, 24)
-TUNABLE_PARAM(Score, ch_cap, 210, 100, 1000)
+TUNABLE_PARAM(i32, ch_weight, 16, 1, 32)
+TUNABLE_PARAM(Score, ch_cap, 300, 100, 1000)
+
+TUNABLE_PARAM(Score, see_capture_margin, -50, -200, 0)
+TUNABLE_PARAM(Score, see_quiet_margin, -50, -200, -5)
+TUNABLE_PARAM(i32, see_pruning_max_depth, 8, 2, 12)
 
 #ifdef TUNE_BUILD
 inline void print_optuna_json()
@@ -146,6 +160,12 @@ struct SearchState
     // Correction history ([color][pawn_hash % 16384]).
     i16 correction_history[2][16384] {};
 
+    // Capture history ([piece][to][captured_piece_type]).
+    i16 capture_history[16][64][8] {};
+
+    // Eval tracking for improving context.
+    Score evals[MAX_PLY] {};
+
     void clear_heuristics()
     {
         std::memset(killers, 0, sizeof(killers));
@@ -153,6 +173,7 @@ struct SearchState
         std::memset(countermoves, 0, sizeof(countermoves));
         std::memset(cont_history, 0, sizeof(cont_history));
         std::memset(correction_history, 0, sizeof(correction_history));
+        std::memset(capture_history, 0, sizeof(capture_history));
     }
 
     bool time_up()
