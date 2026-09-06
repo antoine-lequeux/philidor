@@ -10,11 +10,11 @@
 #include <format>
 #include <print>
 
-Board::Board() = default;
+Board::Board() : history(std::make_unique<std::array<State, 512>>()) {}
 
 Board::~Board() = default;
 
-Board::Board(const Board& other)
+Board::Board(const Board& other) : history(std::make_unique<std::array<State, 512>>(*other.history))
 {
     pieces = other.pieces;
     kings = other.kings;
@@ -25,14 +25,13 @@ Board::Board(const Board& other)
     occupancy = other.occupancy;
     side_to_move = other.side_to_move;
     ply = other.ply;
-    history = other.history;
-    nnue = other.nnue;
 }
 
 Board& Board::operator=(const Board& other)
 {
     if (this != &other)
     {
+        *history = *other.history;
         pieces = other.pieces;
         kings = other.kings;
         piece_bb = other.piece_bb;
@@ -42,8 +41,6 @@ Board& Board::operator=(const Board& other)
         occupancy = other.occupancy;
         side_to_move = other.side_to_move;
         ply = other.ply;
-        history = other.history;
-        nnue = other.nnue;
     }
     return *this;
 }
@@ -170,11 +167,11 @@ std::expected<Board, std::string> Board::from_fen(std::string_view fen)
             }
         }
     }
-    board.history[0].castling_rights = rights;
+    (*board.history)[0].castling_rights = rights;
 
     if (ep == "-")
     {
-        board.history[0].ep_square = NO_SQUARE;
+        (*board.history)[0].ep_square = NO_SQUARE;
     }
     else
     {
@@ -183,7 +180,7 @@ std::expected<Board, std::string> Board::from_fen(std::string_view fen)
         char r = ep[1];
         if (f < 'a' || f > 'h' || r < '1' || r > '8') return std::unexpected("Invalid en passant square coordinates.");
 
-        board.history[0].ep_square = static_cast<Square>((r - '1') * 8 + (f - 'a'));
+        (*board.history)[0].ep_square = static_cast<Square>((r - '1') * 8 + (f - 'a'));
     }
 
     u16 clock_val = 0;
@@ -192,10 +189,10 @@ std::expected<Board, std::string> Board::from_fen(std::string_view fen)
     if (ec != std::errc {} || ptr != halfmove.data() + halfmove.size())
         return std::unexpected("Invalid halfmove clock provided in FEN string.");
 
-    board.history[0].halfmove_clock = clock_val;
-    board.history[0].hash = zobrist::compute_hash(board);
+    (*board.history)[0].halfmove_clock = clock_val;
+    (*board.history)[0].hash = zobrist::compute_hash(board);
 
-    board.nnue.inputs_full_update(0, board.pieces, board.kings);
+    NNUE::update_full((*board.history)[0].acc, board);
 
     return board;
 }
@@ -240,17 +237,24 @@ bool Board::in_check() const
     return is_in_check(*this, side_to_move);
 }
 
-bool Board::is_draw() const
+bool Board::is_draw(i32 search_ply) const
 {
-    if (history[ply].halfmove_clock >= 100) return true;
+    if ((*history)[ply].halfmove_clock >= 100) return true;
     if (ply < 2) return false;
 
-    u64 current_hash = history[ply].hash;
-    u32 limit = ply > history[ply].halfmove_clock ? ply - history[ply].halfmove_clock : 0;
+    u64 current_hash = (*history)[ply].hash;
+    u32 limit = ply > (*history)[ply].halfmove_clock ? ply - (*history)[ply].halfmove_clock : 0;
+    u32 root_ply = ply >= static_cast<u32>(search_ply) ? ply - static_cast<u32>(search_ply) : 0;
 
+    int count = 0;
     for (u32 p = ply - 2; p >= limit; p -= 2)
     {
-        if (history[p].hash == current_hash) return true;
+        if ((*history)[p].hash == current_hash)
+        {
+            if (p >= root_ply) return true;
+            count++;
+            if (count >= 2) return true;
+        }
         if (p < 2) break;
     }
     return false;
@@ -258,7 +262,7 @@ bool Board::is_draw() const
 
 Score Board::evaluate() const
 {
-    return nnue.evaluate(color_index(side_to_move), ply);
+    return NNUE::evaluate((*history)[ply].acc, side_to_move);
 }
 
 template <GenType gt>
@@ -277,8 +281,8 @@ void Board::make_null()
 {
     [[assume(ply < 511)]];
 
-    State& current_state = history[ply];
-    State& next_state = history[ply + 1];
+    State& current_state = (*history)[ply];
+    State& next_state = (*history)[ply + 1];
 
     current_state.move = Move();
     current_state.moved_piece = EMPTY;
@@ -292,8 +296,6 @@ void Board::make_null()
     if (current_state.ep_square != NO_SQUARE) hash ^= zobrist::get_ep_key(current_state.ep_square);
     hash ^= zobrist::get_side_key();
     next_state.hash = hash;
-
-    nnue.copy_accumulator(ply, ply + 1);
 
     side_to_move = !side_to_move;
     ply++;

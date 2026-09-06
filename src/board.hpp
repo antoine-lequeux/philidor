@@ -2,6 +2,7 @@
 
 #include <array>
 #include <expected>
+#include <memory>
 #include <string_view>
 
 #include "defines.hpp"
@@ -18,6 +19,7 @@ struct State
     u16 halfmove_clock;
     Move move;
     u64 hash;
+    Accumulator acc;
 };
 
 struct Board
@@ -48,9 +50,9 @@ struct Board
                 piece_bb[bb_index(Type::ROOK, c)] | piece_bb[bb_index(Type::QUEEN, c)]) != 0;
     }
 
-    u64 zobrist_key() const { return history[ply].hash; }
+    u64 zobrist_key() const { return (*history)[ply].hash; }
     bool in_check() const;
-    bool is_draw() const;
+    bool is_draw(i32 search_ply = 0) const;
 
     Bitboard occupied_by(Color color, Bitboard occ = ~0ULL) const;
     Bitboard attackers_to(Square sq, Bitboard occ) const;
@@ -65,9 +67,7 @@ struct Board
     Bitboard occupancy = 0;
     Color side_to_move = Color::WHITE;
     u32 ply = 0;
-    std::array<State, 512> history {};
-
-    NNUE nnue;
+    std::unique_ptr<std::array<State, 512>> history;
 
 private:
 
@@ -166,14 +166,16 @@ inline void Board::make_move(Move mv)
 
     Piece captured = pieces[to];
 
-    State& current_state = history[ply];
-    State& next_state = history[ply + 1];
+    State& current_state = (*history)[ply];
+    State& next_state = (*history)[ply + 1];
 
     next_state.castling_rights = current_state.castling_rights;
     next_state.halfmove_clock = current_state.halfmove_clock;
     next_state.ep_square = NO_SQUARE;
 
     current_state.moved_piece = moved;
+
+    next_state.acc = current_state.acc;
 
     u64 hash = current_state.hash;
     hash ^= zobrist::get_ep_key(current_state.ep_square);
@@ -186,11 +188,13 @@ inline void Board::make_move(Move mv)
         captured = pieces[capture_sq];
         remove_piece(captured, capture_sq);
         hash ^= zobrist::get_piece_key(captured, capture_sq);
+        NNUE::remove_piece(next_state.acc, color_index(!us), piece_type_index(Type::PAWN), capture_sq);
     }
     else if (captured != EMPTY)
     {
         remove_piece(captured, to);
         hash ^= zobrist::get_piece_key(captured, to);
+        NNUE::remove_piece(next_state.acc, color_index(!us), piece_type_index(get_piece_type(captured)), to);
     }
     current_state.captured_piece = captured;
 
@@ -201,27 +205,35 @@ inline void Board::make_move(Move mv)
 
     move_piece(moved, from, to);
     hash ^= zobrist::get_piece_key(moved, from);
+    NNUE::move_piece(next_state.acc, color_index(us), piece_type_index(moved_type), from, to);
 
     if (flag == Move::CASTLE_FLAG)
     {
         const Piece rook = make_piece(Type::ROOK, us);
+        const usize ci = color_index(us);
+        const usize pt = piece_type_index(Type::ROOK);
+
         switch (to)
         {
             case 6:
                 move_piece(rook, 7, 5);
                 hash ^= zobrist::get_piece_key(rook, 7) ^ zobrist::get_piece_key(rook, 5);
+                NNUE::move_piece(next_state.acc, ci, pt, 7, 5);
                 break; // White Kingside
             case 2:
                 move_piece(rook, 0, 3);
                 hash ^= zobrist::get_piece_key(rook, 0) ^ zobrist::get_piece_key(rook, 3);
+                NNUE::move_piece(next_state.acc, ci, pt, 0, 3);
                 break; // White Queenside
             case 62:
                 move_piece(rook, 63, 61);
                 hash ^= zobrist::get_piece_key(rook, 63) ^ zobrist::get_piece_key(rook, 61);
+                NNUE::move_piece(next_state.acc, ci, pt, 63, 61);
                 break; // Black Kingside
             case 58:
                 move_piece(rook, 56, 59);
                 hash ^= zobrist::get_piece_key(rook, 56) ^ zobrist::get_piece_key(rook, 59);
+                NNUE::move_piece(next_state.acc, ci, pt, 56, 59);
                 break; // Black Queenside
         }
         hash ^= zobrist::get_piece_key(moved, to);
@@ -232,6 +244,8 @@ inline void Board::make_move(Move mv)
         remove_piece(moved, to);
         put_piece(promoted, to);
         hash ^= zobrist::get_piece_key(promoted, to);
+        NNUE::remove_piece(next_state.acc, color_index(us), piece_type_index(Type::PAWN), to);
+        NNUE::add_piece(next_state.acc, color_index(us), piece_type_index(mv.get_promotion_type()), to);
     }
     else
     {
@@ -249,43 +263,6 @@ inline void Board::make_move(Move mv)
 
     current_state.move = mv;
 
-    nnue.copy_accumulator(ply, ply + 1);
-
-    bool is_king = (moved_type == Type::KING);
-    bool bucket_changed = false;
-
-    if (is_king)
-    {
-        Square from_sq_pov = (us == Color::WHITE) ? from : from ^ nnue_constants::BLACK_PERSPECTIVE_XOR;
-        Square to_sq_pov = (us == Color::WHITE) ? to : to ^ nnue_constants::BLACK_PERSPECTIVE_XOR;
-        bucket_changed = nnue_constants::KING_BUCKETS[from_sq_pov] != nnue_constants::KING_BUCKETS[to_sq_pov];
-    }
-
-    if (mv.is_promotion() || flag == Move::ENPASSANT_CAPTURE_FLAG || flag == Move::CASTLE_FLAG ||
-        (is_king && bucket_changed))
-    {
-        nnue.inputs_full_update(ply + 1, pieces, kings);
-    }
-    else
-    {
-        Square king_square_w = kings[color_index(Color::WHITE)];
-        Square king_square_b = kings[color_index(Color::BLACK)];
-
-        if (!is_king)
-        {
-            nnue.inputs_move_piece(
-                color_index(us), piece_type_index(moved_type), from, to, ply + 1, king_square_w, king_square_b
-            );
-        }
-
-        if (captured != EMPTY)
-        {
-            nnue.inputs_remove_piece(
-                color_index(!us), piece_type_index(get_piece_type(captured)), to, ply + 1, king_square_w, king_square_b
-            );
-        }
-    }
-
     side_to_move = !side_to_move;
     ply++;
 }
@@ -301,7 +278,7 @@ inline void Board::unmake_move(Move mv)
     const Square to = mv.get_target_square();
     const u16 flag = mv.get_flag();
 
-    const State& state = history[ply];
+    const State& state = (*history)[ply];
     const Piece moved = state.moved_piece;
     const Piece captured = state.captured_piece;
     const Color us = side_to_move;

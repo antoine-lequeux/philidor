@@ -131,7 +131,7 @@ inline void generate_moves_impl(const Board& board, MoveList& ml)
 
     if (num_checkers == 0 && (type == GenType::ALL || type == GenType::QUIETS))
     {
-        const CastlingRights cr = board.history[board.ply].castling_rights;
+        const CastlingRights cr = (*board.history)[board.ply].castling_rights;
         if constexpr (US == Color::WHITE)
         {
             if (((cr & CastlingRights::WK) != CastlingRights::NONE) && !(occ & WHITE_OO_BLOCKERS) &&
@@ -282,7 +282,7 @@ inline void generate_moves_impl(const Board& board, MoveList& ml)
 
     if constexpr (type == GenType::ALL || type == GenType::CAPTURES)
     {
-        Square ep_sq = board.history[board.ply].ep_square;
+        Square ep_sq = (*board.history)[board.ply].ep_square;
         if (ep_sq != NO_SQUARE)
         {
             const u64 ep_mask = 1ULL << ep_sq;

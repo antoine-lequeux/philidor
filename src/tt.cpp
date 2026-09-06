@@ -45,7 +45,9 @@ void TranspositionTable::store(u64 key, i32 depth, i32 ply, Score score, Bound b
 
     if (entry->key == key)
     {
-        if (depth >= entry->depth || bound == Bound::EXACT) replace = true;
+        entry->set_bound_age(entry->get_bound(), current_age);
+        if (entry->move.is_null() && !best_move.is_null()) entry->move = best_move;
+        if (depth >= entry->depth) replace = true;
     }
     else
     {

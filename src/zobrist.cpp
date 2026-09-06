@@ -76,8 +76,8 @@ u64 compute_hash(const Board& board)
 
     if (board.side_to_move == Color::BLACK) h ^= get_side_key();
 
-    h ^= get_castling_key(board.history[board.ply].castling_rights);
-    h ^= get_ep_key(board.history[board.ply].ep_square);
+    h ^= get_castling_key((*board.history)[board.ply].castling_rights);
+    h ^= get_ep_key((*board.history)[board.ply].ep_square);
 
     return h;
 }

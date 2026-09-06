@@ -217,7 +217,7 @@ score_moves(const Board& board, MoveList& ml, Move tt_move, const SearchState& s
 
                 if (ply >= 2 && board.ply >= 2)
                 {
-                    const State& gp_state = board.history[board.ply - 2];
+                    const State& gp_state = (*board.history)[board.ply - 2];
                     if (gp_state.move.is_some())
                     {
                         Piece gp_piece = gp_state.moved_piece;
@@ -312,7 +312,7 @@ inline void update_quiet_stats(
     // Continuation history bonus (2-ply).
     if (ply >= 2 && board.ply >= 2)
     {
-        const State& gp_state = board.history[board.ply - 2];
+        const State& gp_state = (*board.history)[board.ply - 2];
         if (gp_state.move.is_some())
         {
             Piece gp_piece = gp_state.moved_piece;
@@ -336,7 +336,7 @@ inline void update_quiet_stats(
 
         if (ply >= 2 && board.ply >= 2)
         {
-            const State& gp_state = board.history[board.ply - 2];
+            const State& gp_state = (*board.history)[board.ply - 2];
             if (gp_state.move.is_some())
             {
                 Piece gp_piece = gp_state.moved_piece;
@@ -357,12 +357,21 @@ inline Score get_static_eval(const Board& board, const SearchState& state)
     return eval;
 }
 
-Score qsearch(Board& board, Score alpha, Score beta, SearchState& state, Move prev_move = Move {})
+Score qsearch(Board& board, Score alpha, Score beta, SearchState& state, i32 ply, Move prev_move = Move {})
 {
     if (state.time_up()) return 0;
 
+    if (ply > 0 && board.is_draw(ply)) return 0;
+
+    if (ply >= static_cast<i32>(MAX_PLY) - 1) return board.evaluate();
+
+    // Mate distance pruning.
+    alpha = std::max(alpha, -MATE_VALUE + ply);
+    beta = std::min(beta, MATE_VALUE - ply - 1);
+    if (alpha >= beta) return alpha;
+
     u64 hash = board.zobrist_key();
-    std::optional<TTEntry> tt_entry = state.tt->probe(hash, 0);
+    std::optional<TTEntry> tt_entry = state.tt->probe(hash, ply);
     Move tt_move = Move {};
 
     if (tt_entry)
@@ -385,14 +394,17 @@ Score qsearch(Board& board, Score alpha, Score beta, SearchState& state, Move pr
 
         if (stand_pat >= beta)
         {
-            state.tt->store(hash, 0, 0, stand_pat, Bound::LOWER, Move {});
+            state.tt->store(hash, 0, ply, stand_pat, Bound::LOWER, Move {});
             return stand_pat;
         }
         if (alpha < stand_pat) alpha = stand_pat;
     }
 
     MoveList ml = in_check ? board.generate_moves<GenType::ALL>() : board.generate_moves<GenType::CAPTURES>();
-    score_moves(board, ml, tt_move, state, 0, prev_move);
+
+    if (in_check && ml.empty()) return -MATE_VALUE + ply;
+
+    score_moves(board, ml, tt_move, state, ply, prev_move);
 
     Score original_alpha = alpha;
     Move best_move = Move {};
@@ -426,7 +438,7 @@ Score qsearch(Board& board, Score alpha, Score beta, SearchState& state, Move pr
 
         board.make_move(m);
         state.nodes++;
-        Score score = -qsearch(board, -beta, -alpha, state, m);
+        Score score = -qsearch(board, -beta, -alpha, state, ply + 1, m);
         board.unmake_move(ml[idx].move);
 
         if (state.stop && state.stop->load(std::memory_order_relaxed)) return 0;
@@ -439,15 +451,15 @@ Score qsearch(Board& board, Score alpha, Score beta, SearchState& state, Move pr
 
         if (score >= beta)
         {
-            state.tt->store(hash, 0, 0, best_score, Bound::LOWER, best_move);
+            state.tt->store(hash, 0, ply, best_score, Bound::LOWER, best_move);
             return best_score;
         }
 
         if (score > alpha) alpha = score;
     }
 
-    Bound b = (best_score > original_alpha) ? Bound::EXACT : Bound::UPPER;
-    state.tt->store(hash, 0, 0, best_score, b, best_move);
+    Bound b = (best_score > original_alpha) ? (in_check ? Bound::EXACT : Bound::UPPER) : Bound::UPPER;
+    state.tt->store(hash, 0, ply, best_score, b, best_move);
 
     return best_score;
 }
@@ -461,9 +473,17 @@ Score negamax(
 
     state.nodes++;
 
-    if (ply > 0 && board.is_draw()) return 0;
+    if (ply > 0 && board.is_draw(ply)) return 0;
 
     if (ply >= static_cast<i32>(MAX_PLY) - 1) return board.evaluate();
+
+    // Mate distance pruning.
+    if (ply > 0)
+    {
+        alpha = std::max(alpha, -MATE_VALUE + ply);
+        beta = std::min(beta, MATE_VALUE - ply - 1);
+        if (alpha >= beta) return alpha;
+    }
 
     u64 hash = board.zobrist_key();
 
@@ -479,9 +499,9 @@ Score negamax(
         }
     }
 
-    if (depth <= 0) return qsearch(board, alpha, beta, state);
+    if (depth <= 0) return qsearch(board, alpha, beta, state, ply);
 
-    Move prev_move = board.ply > 0 ? board.history[board.ply - 1].move : Move {};
+    Move prev_move = board.ply > 0 ? (*board.history)[board.ply - 1].move : Move {};
     bool in_check = board.in_check();
     Score static_eval = in_check ? 0 : get_static_eval(board, state);
     state.evals[ply] = static_eval;
@@ -505,12 +525,12 @@ Score negamax(
         // Razoring.
         if (depth <= Params::razoring_max_depth && static_eval + Params::razoring_margin * depth <= alpha)
         {
-            Score r_score = qsearch(board, alpha, beta, state, prev_move);
+            Score r_score = qsearch(board, alpha, beta, state, ply, prev_move);
             if (r_score <= alpha) return r_score;
         }
 
         // Reverse Futility Pruning.
-        if (depth <= Params::rfp_max_depth)
+        if (depth <= Params::rfp_max_depth && std::abs(beta) < MATE_THRESHOLD && std::abs(static_eval) < MATE_THRESHOLD)
         {
             Score rfp_margin = depth * Params::rfp_multiplier;
             if (improving) rfp_margin -= Params::rfp_improving_margin_bonus;
@@ -525,7 +545,7 @@ Score negamax(
 
             Score pc_score;
             if (pc_depth <= 0)
-                pc_score = qsearch(board, pc_beta - 1, pc_beta, state, prev_move);
+                pc_score = qsearch(board, pc_beta - 1, pc_beta, state, ply, prev_move);
             else
                 pc_score = negamax(board, pc_depth, ply, pc_beta - 1, pc_beta, state);
 
@@ -535,7 +555,7 @@ Score negamax(
         // Null Move Pruning.
         if (depth >= Params::nmp_min_depth)
         {
-            bool prev_was_null = board.history[board.ply - 1].move.is_null();
+            bool prev_was_null = (*board.history)[board.ply - 1].move.is_null();
             if (!prev_was_null && board.has_non_pawn_material(board.side_to_move))
             {
                 if (static_eval >= beta)
@@ -555,6 +575,7 @@ Score negamax(
 
     Move tt_move = tt_entry ? tt_entry->move : Move {};
     bool tt_is_singular = false;
+    bool tt_was_tested = false;
 
     // Singular Extensions.
     if (!excluded_move.is_some() && depth >= Params::se_min_depth && tt_entry && tt_move.is_some() && ply > 0)
@@ -565,6 +586,7 @@ Score negamax(
             Score se_beta = std::max(-MATE_VALUE, tt_score - Params::se_margin);
             i32 se_depth = depth - Params::se_depth_reduction;
 
+            tt_was_tested = true;
             Score se_score = negamax(board, se_depth, ply, se_beta - 1, se_beta, state, tt_move);
             if (se_score < se_beta) tt_is_singular = true;
         }
@@ -645,7 +667,7 @@ Score negamax(
                     }
                 }
             }
-            else if (depth >= Params::se_min_depth && !excluded_move.is_some())
+            else if (tt_was_tested && depth >= Params::se_min_depth && !excluded_move.is_some())
             {
                 // Negative extension (TT move was tested but is not singular).
                 extension -= Params::se_negative_extension_depth;
@@ -788,6 +810,13 @@ RootResult search_root(Board& board, i32 depth, Score alpha, Score beta, SearchS
     Move tt_move = tt_entry ? tt_entry->move : Move {};
 
     MoveList ml = board.generate_moves<GenType::ALL>();
+    if (ml.empty())
+    {
+        result.score = board.in_check() ? -MATE_VALUE : 0;
+        result.completed = true;
+        return result;
+    }
+
     score_moves(board, ml, tt_move, state, 0, Move {});
 
     Score best_score = -INF;
@@ -818,7 +847,15 @@ RootResult search_root(Board& board, i32 depth, Score alpha, Score beta, SearchS
 
         board.unmake_move(m);
 
-        if (state.stop && state.stop->load(std::memory_order_relaxed)) return result;
+        if (state.stop && state.stop->load(std::memory_order_relaxed))
+        {
+            if (moves_played > 0)
+            {
+                result.score = best_score;
+                result.best_move = best_move;
+            }
+            return result;
+        }
 
         moves_played++;
 

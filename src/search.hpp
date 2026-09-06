@@ -216,10 +216,10 @@ inline void iterative_deepening(Board& board, i32 max_depth, i64 hard_limit_ms, 
         Score alpha = -INF;
         Score beta = INF;
 
-        if (depth >= 4)
+        if (depth >= 4 && std::abs(score) < MATE_THRESHOLD)
         {
-            alpha = score - delta;
-            beta = score + delta;
+            alpha = std::max(-INF, score - delta);
+            beta = std::min(INF, score + delta);
         }
 
         while (true)
@@ -227,11 +227,10 @@ inline void iterative_deepening(Board& board, i32 max_depth, i64 hard_limit_ms, 
             RootResult res = search_root(board, depth, alpha, beta, *state);
             if (!res.completed)
             {
-                if (!res.best_move.is_null() && (best_move.is_null() || res.score > score))
+                if (!res.best_move.is_null() && best_move.is_null())
                 {
                     score = res.score;
                     best_move = res.best_move;
-                    state->tt->store(board.zobrist_key(), depth, 0, score, Bound::LOWER, best_move);
                 }
                 break;
             }
@@ -241,12 +240,12 @@ inline void iterative_deepening(Board& board, i32 max_depth, i64 hard_limit_ms, 
 
             if (score <= alpha)
             {
-                alpha = std::max(-MATE_VALUE, alpha - delta);
+                alpha = std::max(-INF, alpha - delta);
                 delta += delta / 2;
             }
             else if (score >= beta)
             {
-                beta = std::min(MATE_VALUE, beta + delta);
+                beta = std::min(INF, beta + delta);
                 delta += delta / 2;
             }
             else
@@ -255,18 +254,20 @@ inline void iterative_deepening(Board& board, i32 max_depth, i64 hard_limit_ms, 
             }
         }
 
+        if (state->stop && state->stop->load(std::memory_order_relaxed) && depth > 1) break;
+
         i64 elapsed = now_ms() - state->start_time;
         i64 nps = elapsed > 0 ? (state->nodes * 1000) / elapsed : 0;
 
         std::string score_str;
         if (score > MATE_THRESHOLD)
         {
-            int plies = MATE_VALUE - score;
+            int plies = std::max(1, MATE_VALUE - score);
             score_str = "mate " + std::to_string((plies + 1) / 2);
         }
         else if (score < -MATE_THRESHOLD)
         {
-            int plies = MATE_VALUE + score;
+            int plies = std::max(1, score - (-MATE_VALUE));
             score_str = "mate -" + std::to_string((plies + 1) / 2);
         }
         else

@@ -12,7 +12,6 @@ endif()
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Use ccache if available for build speed
@@ -22,50 +21,14 @@ if(CCACHE_PROGRAM)
     set(CMAKE_CXX_COMPILER_LAUNCHER ${CCACHE_PROGRAM})
 endif()
 
-# Global LTO/IPO for Release
-include(CheckIPOSupported)
-check_ipo_supported(RESULT ipo_ok)
-if(ipo_ok)
-    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
-endif()
-
-# ---------------------------------------------------------
-# Global compiler flags (Windows / Clang focused)
-# ---------------------------------------------------------
-
-if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    # Disable exceptions and RTTI globally so dependencies build without them
-    add_compile_options(
-        "$<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions>"
-        "$<$<COMPILE_LANGUAGE:CXX>:-fno-rtti>"
-    )
-
-    add_link_options("-fuse-ld=lld")
-
-    option(USE_AVX512 "Compile with AVX-512 support" OFF)
-    option(USE_NATIVE "Compile for the host architecture (-march=native)" ON)
-
-    # Architecture / SIMD baseline
-    if(USE_NATIVE)
-        add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-march=native>)
-        message(STATUS "> Architecture detection: Native host architecture (-march=native)")
-    elseif(USE_AVX512)
-        add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-march=x86-64-v4>)
-        message(STATUS "> Architecture detected: AVX-512 / x86-64-v4")
-    else()
-        add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-march=x86-64-v3>)
-        message(STATUS "> Architecture detected: AVX2 / x86-64-v3")
-    endif()
-endif()
-
 # ---------------------------------------------------------
 # FetchContent setup
 # ---------------------------------------------------------
 include(FetchContent)
 
 # Disable test/benchmark builds for EVE
-set(EVE_BUILD_TEST           OFF CACHE BOOL "" FORCE)
-set(EVE_BUILD_BENCHMARKS     OFF CACHE BOOL "" FORCE)
+set(EVE_BUILD_TEST       OFF CACHE BOOL "" FORCE)
+set(EVE_BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
 
 FetchContent_Declare(
     eve
@@ -73,20 +36,7 @@ FetchContent_Declare(
     GIT_TAG        v2023.02.15
     SYSTEM
 )
-
-# Silence all warnings during third-party library compilation.
-set(BACKUP_C_FLAGS "${CMAKE_C_FLAGS}")
-set(BACKUP_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
-if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -w")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -w")
-endif()
-
 FetchContent_MakeAvailable(eve)
-
-# Restore original flags for the actual project
-set(CMAKE_C_FLAGS "${BACKUP_C_FLAGS}")
-set(CMAKE_CXX_FLAGS "${BACKUP_CXX_FLAGS}")
 
 # ---------------------------------------------------------
 # Executable target
@@ -104,14 +54,51 @@ target_sources(philidor PRIVATE
     src/search.cpp
 )
 
-target_link_libraries(philidor PRIVATE
-    eve::eve
-)
+target_link_libraries(philidor PRIVATE eve::eve)
+
+# Enable LTO specifically for this target
+include(CheckIPOSupported)
+check_ipo_supported(RESULT ipo_ok)
+if(ipo_ok)
+    set_target_properties(philidor PROPERTIES INTERPROCEDURAL_OPTIMIZATION TRUE)
+endif()
 
 # ---------------------------------------------------------
-# Optimizations & warnings
+# Compiler flags
 # ---------------------------------------------------------
-if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        target_link_options(philidor PRIVATE "-fuse-ld=lld")
+    endif()
+
+    option(USE_AVX512 "Compile with AVX-512 support" OFF)
+    option(USE_NATIVE "Compile for the host architecture (-march=native)" ON)
+
+    # Detect architecture
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64|ARM64")
+        if(USE_NATIVE)
+            target_compile_options(philidor PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-mcpu=native>)
+        endif()
+        message(STATUS "> Architecture detected: ARM64 / NEON")
+    else()
+        if(USE_NATIVE)
+            target_compile_options(philidor PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-march=native>)
+            message(STATUS "> Architecture detection: Native host architecture (-march=native)")
+        elseif(USE_AVX512)
+            target_compile_options(philidor PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-march=x86-64-v4>)
+            message(STATUS "> Architecture detected: AVX-512 / x86-64-v4")
+        else()
+            target_compile_options(philidor PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-march=x86-64-v3>)
+            message(STATUS "> Architecture detected: AVX2 / x86-64-v3")
+        endif()
+    endif()
+
+    # Base performance flags
+    target_compile_options(philidor PRIVATE
+        "$<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions>"
+        "$<$<COMPILE_LANGUAGE:CXX>:-fno-rtti>"
+    )
 
     # Warnings
     target_compile_options(philidor PRIVATE
@@ -135,8 +122,6 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         -Wextra-semi
         -Wzero-as-null-pointer-constant
         -Wsuggest-override
-        -Wheader-hygiene
-        -Wno-c23-extensions
     )
 
     # Optimization flags for Release
@@ -151,13 +136,11 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         "$<$<CONFIG:Debug>:-O0>"
         "$<$<CONFIG:Debug>:-g3>"
     )
-
 endif()
 
 # ---------------------------------------------------------
 # Build Options
 # ---------------------------------------------------------
-
 option(TUNE_BUILD "Enable parameter tuning via UCI" OFF)
 if(TUNE_BUILD)
     target_compile_definitions(philidor PRIVATE TUNE_BUILD)
