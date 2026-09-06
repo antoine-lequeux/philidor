@@ -543,13 +543,43 @@ Score negamax(
             Score pc_beta = beta + Params::pc_margin;
             i32 pc_depth = depth - Params::pc_depth_reduction;
 
-            Score pc_score;
-            if (pc_depth <= 0)
-                pc_score = qsearch(board, pc_beta - 1, pc_beta, state, ply, prev_move);
-            else
-                pc_score = negamax(board, pc_depth, ply, pc_beta - 1, pc_beta, state);
+            bool skip_probcut = false;
+            if (tt_entry && tt_entry->depth >= pc_depth && tt_entry->score < pc_beta &&
+                tt_entry->get_bound() == Bound::UPPER)
+                skip_probcut = true;
 
-            if (pc_score >= pc_beta) return pc_beta;
+            if (!skip_probcut)
+            {
+                Move tt_m = tt_entry ? tt_entry->move : Move {};
+                MoveList pc_moves = board.generate_moves<GenType::CAPTURES>();
+                score_moves(board, pc_moves, tt_m, state, ply, prev_move);
+
+                for (usize i = 0; i < pc_moves.size(); ++i)
+                {
+                    pick_best(pc_moves, i);
+                    Move m = pc_moves[i].move;
+
+                    if (!see_ge(board, m, 0)) continue;
+
+                    board.make_move(m);
+
+                    Score pc_score;
+                    if (pc_depth - 1 <= 0)
+                        pc_score = -qsearch(board, -pc_beta, -pc_beta + 1, state, ply + 1, m);
+                    else
+                        pc_score = -negamax(board, pc_depth - 1, ply + 1, -pc_beta, -pc_beta + 1, state);
+
+                    board.unmake_move(m);
+
+                    if (state.stop && state.stop->load(std::memory_order_relaxed)) return 0;
+
+                    if (pc_score >= pc_beta)
+                    {
+                        state.tt->store(hash, pc_depth, ply, pc_beta, Bound::LOWER, m);
+                        return pc_beta;
+                    }
+                }
+            }
         }
 
         // Null Move Pruning.
@@ -561,6 +591,9 @@ Score negamax(
                 if (static_eval >= beta)
                 {
                     i32 R = Params::nmp_base_r + depth / Params::nmp_depth_divisor;
+                    R += std::min(Params::nmp_max_eval_r, (static_eval - beta) / Params::nmp_margin_divisor);
+                    R = std::min(R, depth);
+
                     board.make_null();
                     Score null_score = -negamax(board, depth - 1 - R, ply + 1, -beta, -beta + 1, state);
                     board.unmake_null();
@@ -624,6 +657,9 @@ Score negamax(
 
         bool is_quiet = !m.is_capture() && !m.is_promotion();
         bool is_killer = (m == state.killers[ply][0] || m == state.killers[ply][1]);
+        bool is_countermove =
+            prev_move.is_some() &&
+            (m == state.countermoves[board.pieces[prev_move.get_target_square()]][prev_move.get_target_square()]);
 
         // SEE Pruning.
         if (best_score > -MATE_THRESHOLD && depth <= Params::see_pruning_max_depth && m != tt_move && !is_killer)
@@ -633,10 +669,19 @@ Score negamax(
         }
 
         // Late Move Pruning.
-        if (!in_check && depth <= Params::lmp_max_depth && is_quiet)
+        if (!in_check && depth <= Params::lmp_max_depth && is_quiet && !is_killer)
         {
-            i32 lmp_threshold = Params::lmp_base + (depth * depth * Params::lmp_multiplier) / 10;
+            i32 lmp_threshold =
+                (Params::lmp_base + (depth * depth * Params::lmp_multiplier) / 10) / (improving ? 1 : 2);
             if (moves_played >= lmp_threshold) continue;
+        }
+
+        // History Pruning.
+        if (!in_check && depth <= Params::hp_max_depth && is_quiet && !is_killer && !is_countermove &&
+            moves_played > 0 && best_score > -MATE_THRESHOLD)
+        {
+            i32 hist = state.history[color_index(board.side_to_move)][m.from_to_index()];
+            if (hist < -Params::hp_margin * depth) continue;
         }
 
         // Futility Pruning.
@@ -686,35 +731,42 @@ Score negamax(
         else
         {
             // Late Move Reductions.
-            if (depth >= 3 && moves_played >= 1 && is_quiet && !in_check && extension == 0)
+            if (depth >= 3 && moves_played >= 1 && !in_check && extension == 0)
             {
-                i32 R = LMR_TABLE[std::min(depth, 63)][std::min(moves_played, 63)];
-
-                if (!is_quiet)
+                i32 R = 0;
+                if (is_quiet)
                 {
-                    if (!see_ge(board, m, 0))
-                        R += 1;
-                    else
-                        R -= 1;
+                    R = LMR_TABLE[std::min(depth, 63)][std::min(moves_played, 63)];
+
+                    if (improving) R -= Params::lmr_improving_reduction;
+
+                    // Reduce less for killers and countermoves.
+                    if (is_killer) R -= 1;
+                    if (is_countermove) R -= 1;
+
+                    // Reduce less/more based on history score.
+                    R -= state.history[color_index(!board.side_to_move)][m.from_to_index()] /
+                         Params::lmr_history_divisor;
+                }
+                else if (moves_played >= Params::lmr_capture_moves)
+                {
+                    // Capture LMR: reduce late or losing captures.
+                    R = 1;
+                    if (!see_ge(board, m, 0)) R += 1;
+                    if (improving) R -= Params::lmr_improving_reduction;
                 }
 
-                if (improving) R -= Params::lmr_improving_reduction;
-
-                // Reduce less for killers and countermoves.
-                if (m == state.killers[ply][0] || m == state.killers[ply][1]) R -= 1;
-                if (prev_move.is_some())
+                if (R > 0)
                 {
-                    Piece pm_piece = board.pieces[prev_move.get_target_square()];
-                    Square pm_to = prev_move.get_target_square();
-                    if (m == state.countermoves[pm_piece][pm_to]) R -= 1;
+                    R = std::clamp(R, 1, new_depth - 1);
+                    score =
+                        -negamax(board, new_depth - R, ply + 1, -alpha - 1, -alpha, state, Move {}, next_double_ext);
                 }
-
-                // Reduce less/more based on history score.
-                R -= state.history[color_index(!board.side_to_move)][m.from_to_index()] / Params::lmr_history_divisor;
-
-                R = std::clamp(R, 0, new_depth - 1);
-
-                score = -negamax(board, new_depth - R, ply + 1, -alpha - 1, -alpha, state, Move {}, next_double_ext);
+                else
+                {
+                    // Force a full-depth zero-window search.
+                    score = alpha + 1;
+                }
             }
             else
             {
@@ -820,7 +872,7 @@ RootResult search_root(Board& board, i32 depth, Score alpha, Score beta, SearchS
     score_moves(board, ml, tt_move, state, 0, Move {});
 
     Score best_score = -INF;
-    Move best_move {};
+    Move best_move = tt_move.is_some() ? tt_move : ml[0].move;
     Bound bound = Bound::UPPER;
     i32 moves_played = 0;
 

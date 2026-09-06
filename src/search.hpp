@@ -57,6 +57,7 @@ TUNABLE_PARAM(i32, lmr_base_100, 75, 40, 150)
 TUNABLE_PARAM(i32, lmr_divisor_100, 225, 150, 400)
 TUNABLE_PARAM(i32, lmr_history_divisor, 4000, 2000, 8000)
 TUNABLE_PARAM(i32, lmr_improving_reduction, 1, -2, 2)
+TUNABLE_PARAM(i32, lmr_capture_moves, 4, 2, 8)
 
 TUNABLE_PARAM(i32, history_bonus_max, 400, 200, 1000)
 TUNABLE_PARAM(i32, history_bonus_mult, 4, 1, 8)
@@ -73,6 +74,8 @@ TUNABLE_PARAM(Score, rfp_improving_margin_bonus, 50, -100, 200)
 TUNABLE_PARAM(i32, nmp_min_depth, 3, 1, 5)
 TUNABLE_PARAM(i32, nmp_base_r, 3, 1, 6)
 TUNABLE_PARAM(i32, nmp_depth_divisor, 4, 2, 8)
+TUNABLE_PARAM(i32, nmp_margin_divisor, 200, 100, 400)
+TUNABLE_PARAM(i32, nmp_max_eval_r, 3, 1, 4)
 
 TUNABLE_PARAM(i32, fp_max_depth, 6, 3, 9)
 TUNABLE_PARAM(i32, fp_multiplier, 120, 50, 200)
@@ -84,7 +87,10 @@ TUNABLE_PARAM(i32, iir_reduction, 1, 1, 3)
 
 TUNABLE_PARAM(i32, lmp_max_depth, 8, 3, 12)
 TUNABLE_PARAM(i32, lmp_base, 3, 1, 10)
-TUNABLE_PARAM(i32, lmp_multiplier, 15, 5, 30)
+TUNABLE_PARAM(i32, lmp_multiplier, 12, 3, 30)
+
+TUNABLE_PARAM(i32, hp_max_depth, 4, 1, 8)
+TUNABLE_PARAM(i32, hp_margin, 2000, 500, 5000)
 
 TUNABLE_PARAM(i32, se_min_depth, 8, 4, 12)
 TUNABLE_PARAM(i32, se_depth_reduction, 4, 2, 8)
@@ -222,39 +228,49 @@ inline void iterative_deepening(Board& board, i32 max_depth, i64 hard_limit_ms, 
             beta = std::min(INF, score + delta);
         }
 
+        Move iter_best_move = Move {};
+        Score iter_score = 0;
+        bool iter_completed = false;
+
         while (true)
         {
             RootResult res = search_root(board, depth, alpha, beta, *state);
-            if (!res.completed)
-            {
-                if (!res.best_move.is_null() && best_move.is_null())
-                {
-                    score = res.score;
-                    best_move = res.best_move;
-                }
-                break;
-            }
+            if (!res.completed) break;
 
-            score = res.score;
-            best_move = res.best_move;
+            iter_score = res.score;
+            iter_best_move = res.best_move;
 
-            if (score <= alpha)
+            if (iter_score <= alpha)
             {
                 alpha = std::max(-INF, alpha - delta);
                 delta += delta / 2;
             }
-            else if (score >= beta)
+            else if (iter_score >= beta)
             {
                 beta = std::min(INF, beta + delta);
                 delta += delta / 2;
             }
             else
             {
-                break; // Score is within window.
+                iter_completed = true;
+                break; // Score is within window and depth search is completed.
             }
         }
 
-        if (state->stop && state->stop->load(std::memory_order_relaxed) && depth > 1) break;
+        if (state->stop && state->stop->load(std::memory_order_relaxed))
+        {
+            if (depth == 1 && best_move.is_null())
+            {
+                MoveList ml = board.generate_moves<GenType::ALL>();
+                best_move = iter_best_move.is_null() ? (ml.empty() ? Move {} : ml[0].move) : iter_best_move;
+            }
+            break;
+        }
+
+        if (!iter_completed) break;
+
+        best_move = iter_best_move;
+        score = iter_score;
 
         i64 elapsed = now_ms() - state->start_time;
         i64 nps = elapsed > 0 ? (state->nodes * 1000) / elapsed : 0;
@@ -281,36 +297,40 @@ inline void iterative_deepening(Board& board, i32 max_depth, i64 hard_limit_ms, 
         Board pv_board = board;
         for (i32 i = 0; i < depth; i++)
         {
-            if (auto entry = state->tt->probe(pv_board.zobrist_key(), 0))
-            {
-                Move pv_move = entry->move;
-                if (pv_move.is_null()) break;
+            Move pv_move = Move {};
+            if (i == 0)
+                pv_move = best_move;
+            else if (auto entry = state->tt->probe(pv_board.zobrist_key(), 0))
+                pv_move = entry->move;
 
-                MoveList ml = pv_board.generate_moves<GenType::ALL>();
-                bool valid = false;
-                for (ScoredMove sm : ml)
+            if (pv_move.is_null()) break;
+
+            MoveList ml = pv_board.generate_moves<GenType::ALL>();
+            bool valid = false;
+            for (ScoredMove sm : ml)
+            {
+                if (sm.move == pv_move)
                 {
-                    if (sm.move == pv_move)
-                    {
-                        valid = true;
-                        break;
-                    }
+                    valid = true;
+                    break;
                 }
-                if (!valid) break;
+            }
+            if (!valid) break;
 
-                std::cout << " " << pv_move.to_uci();
-                pv_board.make_move(pv_move);
-                if (pv_board.is_draw()) break;
-            }
-            else
-            {
-                break;
-            }
+            std::cout << " " << pv_move.to_uci();
+            pv_board.make_move(pv_move);
+            if (pv_board.is_draw(i + 1)) break;
         }
         std::cout << std::endl;
 
         if (state->time_up()) break;
         if (now_ms() - state->start_time >= soft_limit_ms) break;
+    }
+
+    if (best_move.is_null())
+    {
+        MoveList ml = board.generate_moves<GenType::ALL>();
+        if (!ml.empty()) best_move = ml[0].move;
     }
 
     std::cout << "bestmove " << best_move.to_uci() << std::endl;
