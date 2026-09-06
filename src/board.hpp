@@ -16,9 +16,12 @@ struct State
     Square ep_square;
     Piece captured_piece;
     Piece moved_piece;
+    Color side_to_move;
     u16 halfmove_clock;
     Move move;
     u64 hash;
+    u64 pawn_hash;
+    bool acc_computed;
     Accumulator acc;
 };
 
@@ -38,6 +41,7 @@ struct Board
     void display(bool white_perspective = true) const;
 
     Score evaluate() const;
+    void ensure_accumulator() const;
     template <GenType gt>
     MoveList generate_moves() const;
 
@@ -51,6 +55,7 @@ struct Board
     }
 
     u64 zobrist_key() const { return (*history)[ply].hash; }
+    u64 pawn_key() const { return (*history)[ply].pawn_hash; }
     bool in_check() const;
     bool is_pseudo_legal(Move m) const;
     bool is_legal(Move m);
@@ -179,15 +184,17 @@ inline void Board::make_move(Move mv)
     next_state.castling_rights = current_state.castling_rights;
     next_state.halfmove_clock = current_state.halfmove_clock;
     next_state.ep_square = NO_SQUARE;
+    next_state.acc_computed = false;
 
     current_state.moved_piece = moved;
-
-    next_state.acc = current_state.acc;
+    current_state.side_to_move = us;
 
     u64 hash = current_state.hash;
     hash ^= zobrist::get_ep_key(current_state.ep_square);
     hash ^= zobrist::get_castling_key(current_state.castling_rights);
     hash ^= zobrist::get_side_key();
+
+    u64 pawn_hash = current_state.pawn_hash;
 
     if (flag == Move::ENPASSANT_CAPTURE_FLAG)
     {
@@ -195,13 +202,13 @@ inline void Board::make_move(Move mv)
         captured = pieces[capture_sq];
         remove_piece(captured, capture_sq);
         hash ^= zobrist::get_piece_key(captured, capture_sq);
-        NNUE::remove_piece(next_state.acc, color_index(!us), piece_type_index(Type::PAWN), capture_sq);
+        pawn_hash ^= zobrist::get_piece_key(captured, capture_sq);
     }
     else if (captured != EMPTY)
     {
         remove_piece(captured, to);
         hash ^= zobrist::get_piece_key(captured, to);
-        NNUE::remove_piece(next_state.acc, color_index(!us), piece_type_index(get_piece_type(captured)), to);
+        if (get_piece_type(captured) == Type::PAWN) pawn_hash ^= zobrist::get_piece_key(captured, to);
     }
     current_state.captured_piece = captured;
 
@@ -212,35 +219,29 @@ inline void Board::make_move(Move mv)
 
     move_piece(moved, from, to);
     hash ^= zobrist::get_piece_key(moved, from);
-    NNUE::move_piece(next_state.acc, color_index(us), piece_type_index(moved_type), from, to);
+    if (moved_type == Type::PAWN) pawn_hash ^= zobrist::get_piece_key(moved, from);
 
     if (flag == Move::CASTLE_FLAG)
     {
         const Piece rook = make_piece(Type::ROOK, us);
-        const usize ci = color_index(us);
-        const usize pt = piece_type_index(Type::ROOK);
 
         switch (to)
         {
             case 6:
                 move_piece(rook, 7, 5);
                 hash ^= zobrist::get_piece_key(rook, 7) ^ zobrist::get_piece_key(rook, 5);
-                NNUE::move_piece(next_state.acc, ci, pt, 7, 5);
                 break; // White Kingside
             case 2:
                 move_piece(rook, 0, 3);
                 hash ^= zobrist::get_piece_key(rook, 0) ^ zobrist::get_piece_key(rook, 3);
-                NNUE::move_piece(next_state.acc, ci, pt, 0, 3);
                 break; // White Queenside
             case 62:
                 move_piece(rook, 63, 61);
                 hash ^= zobrist::get_piece_key(rook, 63) ^ zobrist::get_piece_key(rook, 61);
-                NNUE::move_piece(next_state.acc, ci, pt, 63, 61);
                 break; // Black Kingside
             case 58:
                 move_piece(rook, 56, 59);
                 hash ^= zobrist::get_piece_key(rook, 56) ^ zobrist::get_piece_key(rook, 59);
-                NNUE::move_piece(next_state.acc, ci, pt, 56, 59);
                 break; // Black Queenside
         }
         hash ^= zobrist::get_piece_key(moved, to);
@@ -251,13 +252,12 @@ inline void Board::make_move(Move mv)
         remove_piece(moved, to);
         put_piece(promoted, to);
         hash ^= zobrist::get_piece_key(promoted, to);
-        NNUE::remove_piece(next_state.acc, color_index(us), piece_type_index(Type::PAWN), to);
-        NNUE::add_piece(next_state.acc, color_index(us), piece_type_index(mv.get_promotion_type()), to);
     }
     else
     {
         if (flag == Move::PAWN_TWO_UP_FLAG) next_state.ep_square = (us == Color::WHITE) ? to - 8 : to + 8;
         hash ^= zobrist::get_piece_key(moved, to);
+        if (moved_type == Type::PAWN) pawn_hash ^= zobrist::get_piece_key(moved, to);
     }
 
     next_state.castling_rights &= CASTLING_UPDATE[from];
@@ -267,6 +267,7 @@ inline void Board::make_move(Move mv)
     hash ^= zobrist::get_ep_key(next_state.ep_square);
 
     next_state.hash = hash;
+    next_state.pawn_hash = pawn_hash;
 
     current_state.move = mv;
 

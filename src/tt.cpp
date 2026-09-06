@@ -36,7 +36,7 @@ void TranspositionTable::new_search()
     current_age = static_cast<u8>((current_age + 1) & 0x3F);
 }
 
-void TranspositionTable::store(u64 key, i32 depth, i32 ply, Score score, Bound bound, Move best_move)
+void TranspositionTable::store(u64 key, i32 depth, i32 ply, Score score, Bound bound, Move best_move, Score static_eval)
 {
     usize index = key % num_entries;
     TTEntry* entry = &table[index];
@@ -47,6 +47,7 @@ void TranspositionTable::store(u64 key, i32 depth, i32 ply, Score score, Bound b
     {
         entry->set_bound_age(entry->get_bound(), current_age);
         if (entry->move.is_null() && !best_move.is_null()) entry->move = best_move;
+        if (static_eval != NO_EVAL) entry->static_eval = static_cast<i16>(static_eval);
         if (depth >= entry->depth) replace = true;
     }
     else
@@ -57,7 +58,15 @@ void TranspositionTable::store(u64 key, i32 depth, i32 ply, Score score, Bound b
     if (replace || entry->get_bound() == Bound::NONE)
     {
         bool was_empty = entry->get_bound() == Bound::NONE;
-        entry->key = key;
+        if (entry->key != key)
+        {
+            entry->key = key;
+            entry->static_eval = static_cast<i16>(static_eval);
+        }
+        else if (static_eval != NO_EVAL)
+        {
+            entry->static_eval = static_cast<i16>(static_eval);
+        }
         entry->score = static_cast<i16>(score_to_tt(score, ply));
         entry->depth = static_cast<i8>(depth);
         entry->set_bound_age(bound, current_age);

@@ -191,6 +191,8 @@ std::expected<Board, std::string> Board::from_fen(std::string_view fen)
 
     (*board.history)[0].halfmove_clock = clock_val;
     (*board.history)[0].hash = zobrist::compute_hash(board);
+    (*board.history)[0].pawn_hash = zobrist::compute_pawn_hash(board);
+    (*board.history)[0].acc_computed = true;
 
     NNUE::update_full((*board.history)[0].acc, board);
 
@@ -408,8 +410,74 @@ bool Board::is_draw(i32 search_ply) const
     return false;
 }
 
+void Board::ensure_accumulator() const
+{
+    if ((*history)[ply].acc_computed) return;
+
+    u32 p = ply;
+    while (p > 0 && !(*history)[p].acc_computed) p--;
+
+    for (; p < ply; ++p)
+    {
+        const State& from_state = (*history)[p];
+        State& to_state = (*history)[p + 1];
+
+        to_state.acc = from_state.acc;
+
+        Move mv = from_state.move;
+        if (mv.is_null())
+        {
+            to_state.acc_computed = true;
+            continue;
+        }
+
+        Square from = mv.get_start_square();
+        Square to = mv.get_target_square();
+        u16 flag = mv.get_flag();
+
+        Piece moved = from_state.moved_piece;
+        Type moved_type = get_piece_type(moved);
+        Color us = from_state.side_to_move;
+        Piece captured = from_state.captured_piece;
+
+        if (flag == Move::ENPASSANT_CAPTURE_FLAG)
+        {
+            Square capture_sq = (us == Color::WHITE) ? to - 8 : to + 8;
+            NNUE::remove_piece(to_state.acc, color_index(!us), piece_type_index(Type::PAWN), capture_sq);
+        }
+        else if (captured != EMPTY)
+        {
+            NNUE::remove_piece(to_state.acc, color_index(!us), piece_type_index(get_piece_type(captured)), to);
+        }
+
+        NNUE::move_piece(to_state.acc, color_index(us), piece_type_index(moved_type), from, to);
+
+        if (flag == Move::CASTLE_FLAG)
+        {
+            const usize ci = color_index(us);
+            const usize pt = piece_type_index(Type::ROOK);
+
+            switch (to)
+            {
+                case 6: NNUE::move_piece(to_state.acc, ci, pt, 7, 5); break;
+                case 2: NNUE::move_piece(to_state.acc, ci, pt, 0, 3); break;
+                case 62: NNUE::move_piece(to_state.acc, ci, pt, 63, 61); break;
+                case 58: NNUE::move_piece(to_state.acc, ci, pt, 56, 59); break;
+            }
+        }
+        else if (mv.is_promotion())
+        {
+            NNUE::remove_piece(to_state.acc, color_index(us), piece_type_index(Type::PAWN), to);
+            NNUE::add_piece(to_state.acc, color_index(us), piece_type_index(mv.get_promotion_type()), to);
+        }
+
+        to_state.acc_computed = true;
+    }
+}
+
 Score Board::evaluate() const
 {
+    ensure_accumulator();
     return NNUE::evaluate((*history)[ply].acc, side_to_move);
 }
 
@@ -435,10 +503,13 @@ void Board::make_null()
     current_state.move = Move();
     current_state.moved_piece = EMPTY;
     current_state.captured_piece = EMPTY;
+    current_state.side_to_move = side_to_move;
 
     next_state = current_state;
     next_state.ep_square = NO_SQUARE;
     next_state.halfmove_clock++;
+    next_state.pawn_hash = current_state.pawn_hash;
+    next_state.acc_computed = false;
 
     u64 hash = current_state.hash;
     if (current_state.ep_square != NO_SQUARE) hash ^= zobrist::get_ep_key(current_state.ep_square);

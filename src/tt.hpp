@@ -19,6 +19,7 @@ struct TTEntry
     i16 score;
     i8 depth;
     u8 bound_age; // bound: bits [0:1], age: bits [2:7]
+    i16 static_eval;
 
     Bound get_bound() const { return static_cast<Bound>(bound_age & 0x3); }
     u8 get_age() const { return bound_age >> 2; }
@@ -36,7 +37,7 @@ public:
     void clear();
     void new_search();
 
-    void store(u64 key, i32 depth, i32 ply, Score score, Bound bound, Move best_move);
+    void store(u64 key, i32 depth, i32 ply, Score score, Bound bound, Move best_move, Score static_eval = NO_EVAL);
     std::optional<TTEntry> probe(u64 key, i32 ply) const;
     usize get_hashfull() const;
 

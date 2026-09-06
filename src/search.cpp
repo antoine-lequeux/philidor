@@ -606,7 +606,7 @@ inline Score get_static_eval(const Board& board, const SearchState& state)
 {
     Score eval = board.evaluate();
 
-    u64 pawn_hash = zobrist::compute_pawn_hash(board);
+    u64 pawn_hash = board.pawn_key();
     i16 ch = state.correction_history[color_index(board.side_to_move)][pawn_hash & 16383];
     eval = std::clamp<Score>(eval + ch, -MATE_VALUE, MATE_VALUE);
     return eval;
@@ -644,12 +644,15 @@ Score qsearch(Board& board, Score alpha, Score beta, SearchState& state, i32 ply
 
     if (!in_check)
     {
-        stand_pat = get_static_eval(board, state);
+        if (tt_entry && tt_entry->static_eval != NO_EVAL)
+            stand_pat = tt_entry->static_eval;
+        else
+            stand_pat = get_static_eval(board, state);
         best_score = stand_pat;
 
         if (stand_pat >= beta)
         {
-            state.tt->store(hash, 0, ply, stand_pat, Bound::LOWER, Move {});
+            state.tt->store(hash, 0, ply, stand_pat, Bound::LOWER, Move {}, stand_pat);
             return stand_pat;
         }
         if (alpha < stand_pat) alpha = stand_pat;
@@ -706,7 +709,7 @@ Score qsearch(Board& board, Score alpha, Score beta, SearchState& state, i32 ply
 
         if (score >= beta)
         {
-            state.tt->store(hash, 0, ply, best_score, Bound::LOWER, best_move);
+            state.tt->store(hash, 0, ply, best_score, Bound::LOWER, best_move, !in_check ? stand_pat : NO_EVAL);
             return best_score;
         }
 
@@ -714,7 +717,7 @@ Score qsearch(Board& board, Score alpha, Score beta, SearchState& state, i32 ply
     }
 
     Bound b = (best_score > original_alpha) ? (in_check ? Bound::EXACT : Bound::UPPER) : Bound::UPPER;
-    state.tt->store(hash, 0, ply, best_score, b, best_move);
+    state.tt->store(hash, 0, ply, best_score, b, best_move, !in_check ? stand_pat : NO_EVAL);
 
     return best_score;
 }
@@ -758,14 +761,21 @@ Score negamax(
 
     Move prev_move = board.ply > 0 ? (*board.history)[board.ply - 1].move : Move {};
     bool in_check = board.in_check();
-    Score static_eval = in_check ? 0 : get_static_eval(board, state);
+    Score static_eval = NO_EVAL;
+    if (!in_check)
+        if (tt_entry && tt_entry->static_eval != NO_EVAL)
+            static_eval = tt_entry->static_eval;
+        else
+            static_eval = get_static_eval(board, state);
+    else
+        static_eval = 0;
     state.evals[ply] = static_eval;
 
     i16* ch_entry = nullptr;
     if (!in_check)
     {
-        u64 pawn_hash = zobrist::compute_pawn_hash(board);
-        ch_entry = &state.correction_history[color_index(board.side_to_move)][pawn_hash % 16384];
+        u64 pawn_hash = board.pawn_key();
+        ch_entry = &state.correction_history[color_index(board.side_to_move)][pawn_hash & 16383];
     }
 
     bool improving = false;
@@ -830,7 +840,7 @@ Score negamax(
 
                     if (pc_score >= pc_beta)
                     {
-                        state.tt->store(hash, pc_depth, ply, pc_beta, Bound::LOWER, m);
+                        state.tt->store(hash, pc_depth, ply, pc_beta, Bound::LOWER, m, static_eval);
                         return pc_beta;
                     }
                 }
@@ -1078,7 +1088,7 @@ Score negamax(
             return 0;
     }
 
-    state.tt->store(hash, depth, ply, best_score, bound, best_move);
+    state.tt->store(hash, depth, ply, best_score, bound, best_move, !in_check ? static_eval : NO_EVAL);
 
     // Correction history update.
     if (ch_entry && depth >= 1 && !excluded_move.is_some() && std::abs(best_score) < MATE_THRESHOLD)
@@ -1113,6 +1123,16 @@ RootResult search_root(Board& board, i32 depth, Score alpha, Score beta, SearchS
     u64 hash = board.zobrist_key();
     std::optional<TTEntry> tt_entry = state.tt->probe(hash, 0);
     Move tt_move = tt_entry ? tt_entry->move : Move {};
+
+    Score root_static_eval = NO_EVAL;
+    if (!board.in_check())
+        if (tt_entry && tt_entry->static_eval != NO_EVAL)
+            root_static_eval = tt_entry->static_eval;
+        else
+            root_static_eval = get_static_eval(board, state);
+    else
+        root_static_eval = 0;
+    state.evals[0] = root_static_eval;
 
     MovePicker picker(board, tt_move, state, 0, Move {});
 
@@ -1182,7 +1202,7 @@ RootResult search_root(Board& board, i32 depth, Score alpha, Score beta, SearchS
         return result;
     }
 
-    state.tt->store(hash, depth, 0, best_score, bound, best_move);
+    state.tt->store(hash, depth, 0, best_score, bound, best_move, !board.in_check() ? root_static_eval : NO_EVAL);
 
     result.score = best_score;
     result.best_move = best_move;

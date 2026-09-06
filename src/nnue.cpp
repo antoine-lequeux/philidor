@@ -64,7 +64,6 @@ void NNUE::add_piece(Accumulator& acc, usize color, usize piece_type, Square sq)
     usize w_idx = get_feature_index(color, piece_type, sq, false);
     usize b_idx = get_feature_index(color, piece_type, sq, true);
 
-    using eve::wide;
     constexpr usize N = eve::expected_cardinal_v<i16>;
 
     for (usize i = 0; i < nnue_constants::HIDDEN; i += N)
@@ -85,7 +84,6 @@ void NNUE::remove_piece(Accumulator& acc, usize color, usize piece_type, Square 
     usize w_idx = get_feature_index(color, piece_type, sq, false);
     usize b_idx = get_feature_index(color, piece_type, sq, true);
 
-    using eve::wide;
     constexpr usize N = eve::expected_cardinal_v<i16>;
 
     for (usize i = 0; i < nnue_constants::HIDDEN; i += N)
@@ -109,7 +107,6 @@ void NNUE::move_piece(Accumulator& acc, usize color, usize piece_type, Square fr
     usize to_w_idx = get_feature_index(color, piece_type, to_sq, false);
     usize to_b_idx = get_feature_index(color, piece_type, to_sq, true);
 
-    using eve::wide;
     constexpr usize N = eve::expected_cardinal_v<i16>;
 
     for (usize i = 0; i < nnue_constants::HIDDEN; i += N)
@@ -143,8 +140,8 @@ Score NNUE::evaluate(const Accumulator& acc, Color side_to_move)
     using eve::as;
     using eve::wide;
 
-    constexpr usize N = eve::expected_cardinal_v<i16>;
-
+    constexpr usize N = eve::expected_cardinal_v<i32>;
+    using wide_i16_N = eve::wide<i16, eve::fixed<N>>;
     using wide_i32_N = eve::wide<i32, eve::fixed<N>>;
 
     const auto& net = get_network();
@@ -152,12 +149,12 @@ Score NNUE::evaluate(const Accumulator& acc, Color side_to_move)
     const i16* us = (side_to_move == Color::WHITE) ? acc.white : acc.black;
     const i16* them = (side_to_move == Color::WHITE) ? acc.black : acc.white;
 
-    // Accumulator activation (clipped ReLU).
     ALIGN i16 activated[512];
     auto zero = wide<i16>(0);
     auto qa = wide<i16>(nnue_constants::QA);
 
-    for (usize i = 0; i < nnue_constants::HIDDEN; i += N)
+    constexpr usize N16 = eve::expected_cardinal_v<i16>;
+    for (usize i = 0; i < nnue_constants::HIDDEN; i += N16)
     {
         auto us_val = eve::clamp(eve::load(us + i), zero, qa);
         auto them_val = eve::clamp(eve::load(them + i), zero, qa);
@@ -167,53 +164,91 @@ Score NNUE::evaluate(const Accumulator& acc, Color side_to_move)
 
     // Layer 1 (512 -> 32).
     ALIGN i16 l1_out[32];
-    for (usize i = 0; i < 32; ++i)
+    for (usize i = 0; i < 32; i += 8)
     {
-        wide_i32_N sum_vec(0);
+        wide_i32_N sum0(0), sum1(0), sum2(0), sum3(0), sum4(0), sum5(0), sum6(0), sum7(0);
 
         for (usize j = 0; j < 512; j += N)
         {
-            auto act = eve::load(activated + j);
-            auto wgt = eve::load(net.l1_weights[i] + j);
-            sum_vec += eve::convert(act, as<i32>()) * eve::convert(wgt, as<i32>());
+            auto act = eve::convert(eve::load(activated + j, as<wide_i16_N> {}), as<i32>());
+            auto w0 = eve::convert(eve::load(net.l1_weights[i + 0] + j, as<wide_i16_N> {}), as<i32>());
+            auto w1 = eve::convert(eve::load(net.l1_weights[i + 1] + j, as<wide_i16_N> {}), as<i32>());
+            auto w2 = eve::convert(eve::load(net.l1_weights[i + 2] + j, as<wide_i16_N> {}), as<i32>());
+            auto w3 = eve::convert(eve::load(net.l1_weights[i + 3] + j, as<wide_i16_N> {}), as<i32>());
+            auto w4 = eve::convert(eve::load(net.l1_weights[i + 4] + j, as<wide_i16_N> {}), as<i32>());
+            auto w5 = eve::convert(eve::load(net.l1_weights[i + 5] + j, as<wide_i16_N> {}), as<i32>());
+            auto w6 = eve::convert(eve::load(net.l1_weights[i + 6] + j, as<wide_i16_N> {}), as<i32>());
+            auto w7 = eve::convert(eve::load(net.l1_weights[i + 7] + j, as<wide_i16_N> {}), as<i32>());
+
+            sum0 = eve::fma(act, w0, sum0);
+            sum1 = eve::fma(act, w1, sum1);
+            sum2 = eve::fma(act, w2, sum2);
+            sum3 = eve::fma(act, w3, sum3);
+            sum4 = eve::fma(act, w4, sum4);
+            sum5 = eve::fma(act, w5, sum5);
+            sum6 = eve::fma(act, w6, sum6);
+            sum7 = eve::fma(act, w7, sum7);
         }
 
-        i32 bias = static_cast<i32>(net.l1_biases[i]) * nnue_constants::QA;
-        i32 sum = eve::reduce(sum_vec) + bias;
+        auto finish_l1 = [&](const wide_i32_N& s, usize idx) {
+            i32 bias = static_cast<i32>(net.l1_biases[idx]) * nnue_constants::QA;
+            i32 sum = eve::reduce(s) + bias;
+            l1_out[idx] =
+                static_cast<i16>(std::clamp(sum / nnue_constants::QA, 0, static_cast<i32>(nnue_constants::QB)));
+        };
 
-        l1_out[i] = static_cast<i16>(std::clamp(sum / nnue_constants::QA, 0, static_cast<i32>(nnue_constants::QB)));
+        finish_l1(sum0, i + 0);
+        finish_l1(sum1, i + 1);
+        finish_l1(sum2, i + 2);
+        finish_l1(sum3, i + 3);
+        finish_l1(sum4, i + 4);
+        finish_l1(sum5, i + 5);
+        finish_l1(sum6, i + 6);
+        finish_l1(sum7, i + 7);
     }
 
     // Layer 2 (32 -> 32).
     ALIGN i16 l2_out[32];
-    for (usize i = 0; i < 32; ++i)
+    for (usize i = 0; i < 32; i += 4)
     {
-        wide_i32_N sum_vec(0);
-
+        wide_i32_N sum0(0), sum1(0), sum2(0), sum3(0);
         for (usize j = 0; j < 32; j += N)
         {
-            auto act = eve::load(l1_out + j);
-            auto wgt = eve::load(net.l2_weights[i] + j);
-            sum_vec += eve::convert(act, as<i32>()) * eve::convert(wgt, as<i32>());
+            auto act = eve::convert(eve::load(l1_out + j, as<wide_i16_N> {}), as<i32>());
+            auto w0 = eve::convert(eve::load(net.l2_weights[i + 0] + j, as<wide_i16_N> {}), as<i32>());
+            auto w1 = eve::convert(eve::load(net.l2_weights[i + 1] + j, as<wide_i16_N> {}), as<i32>());
+            auto w2 = eve::convert(eve::load(net.l2_weights[i + 2] + j, as<wide_i16_N> {}), as<i32>());
+            auto w3 = eve::convert(eve::load(net.l2_weights[i + 3] + j, as<wide_i16_N> {}), as<i32>());
+
+            sum0 = eve::fma(act, w0, sum0);
+            sum1 = eve::fma(act, w1, sum1);
+            sum2 = eve::fma(act, w2, sum2);
+            sum3 = eve::fma(act, w3, sum3);
         }
 
-        i32 bias = static_cast<i32>(net.l2_biases[i]) * nnue_constants::QB;
-        i32 sum = eve::reduce(sum_vec) + bias;
+        auto finish_l2 = [&](const wide_i32_N& s, usize idx) {
+            i32 bias = static_cast<i32>(net.l2_biases[idx]) * nnue_constants::QB;
+            i32 res = eve::reduce(s) + bias;
+            l2_out[idx] =
+                static_cast<i16>(std::clamp(res / nnue_constants::QB, 0, static_cast<i32>(nnue_constants::QB)));
+        };
 
-        l2_out[i] = static_cast<i16>(std::clamp(sum / nnue_constants::QB, 0, static_cast<i32>(nnue_constants::QB)));
+        finish_l2(sum0, i + 0);
+        finish_l2(sum1, i + 1);
+        finish_l2(sum2, i + 2);
+        finish_l2(sum3, i + 3);
     }
 
     // Layer 3 (32 -> 1).
-    wide_i32_N final_sum_vec(0);
+    wide_i32_N sum_l3(0);
     for (usize j = 0; j < 32; j += N)
     {
-        auto act = eve::load(l2_out + j);
-        auto wgt = eve::load(net.l3_weights[0] + j);
-        final_sum_vec += eve::convert(act, as<i32>()) * eve::convert(wgt, as<i32>());
+        auto act = eve::convert(eve::load(l2_out + j, as<wide_i16_N> {}), as<i32>());
+        auto w = eve::convert(eve::load(net.l3_weights[0] + j, as<wide_i16_N> {}), as<i32>());
+        sum_l3 = eve::fma(act, w, sum_l3);
     }
-
     i32 l3_bias = static_cast<i32>(net.l3_biases[0]) * nnue_constants::QB;
-    i32 final_sum = eve::reduce(final_sum_vec) + l3_bias;
+    i32 final_sum = eve::reduce(sum_l3) + l3_bias;
 
     // Output descaling.
     constexpr i64 DIVISOR = static_cast<i64>(nnue_constants::QA) * nnue_constants::QB * nnue_constants::QB;

@@ -23,6 +23,7 @@ using Score = i32;
 constexpr Score INF = 32000;
 constexpr Score MATE_VALUE = 31000;
 constexpr Score MATE_THRESHOLD = MATE_VALUE - 1000;
+constexpr Score NO_EVAL = 32002;
 constexpr usize MAX_PLY = 128;
 
 using Piece = u32;
