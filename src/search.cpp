@@ -166,10 +166,8 @@ score_moves(const Board& board, MoveList& ml, Move tt_move, const SearchState& s
         if (m == tt_move)
         {
             sm.score = Params::tt_move_score;
-            continue;
         }
-
-        if (m.is_capture())
+        else if (m.is_capture())
         {
             Square to = m.get_target_square();
             Square from = m.get_start_square();
@@ -349,23 +347,13 @@ inline void update_quiet_stats(
     }
 }
 
-inline Score get_static_eval(const Board& board, const SearchState& state, Move prev_move)
+inline Score get_static_eval(const Board& board, const SearchState& state)
 {
     Score eval = board.evaluate();
 
     u64 pawn_hash = zobrist::compute_pawn_hash(board);
-    i16 ch = state.correction_history[color_index(board.side_to_move)][pawn_hash % 16384];
+    i16 ch = state.correction_history[color_index(board.side_to_move)][pawn_hash & 16383];
     eval = std::clamp<Score>(eval + ch, -MATE_VALUE, MATE_VALUE);
-
-    if (prev_move.is_some())
-    {
-        usize opp = color_index(!board.side_to_move);
-        i32 hist = state.history[opp][prev_move.from_to_index()];
-        Score stat_bonus = std::clamp<Score>(
-            hist / Params::statscore_divisor, -Params::statscore_max_bonus, Params::statscore_max_bonus
-        );
-        eval = std::clamp<Score>(eval - stat_bonus, -MATE_VALUE, MATE_VALUE);
-    }
     return eval;
 }
 
@@ -373,19 +361,46 @@ Score qsearch(Board& board, Score alpha, Score beta, SearchState& state, Move pr
 {
     if (state.time_up()) return 0;
 
+    u64 hash = board.zobrist_key();
+    std::optional<TTEntry> tt_entry = state.tt->probe(hash, 0);
+    Move tt_move = Move {};
+
+    if (tt_entry)
+    {
+        tt_move = tt_entry->move;
+        Bound b = tt_entry->get_bound();
+        if (b == Bound::EXACT) return tt_entry->score;
+        if (b == Bound::UPPER && tt_entry->score <= alpha) return tt_entry->score;
+        if (b == Bound::LOWER && tt_entry->score >= beta) return tt_entry->score;
+    }
+
     bool in_check = board.in_check();
-    Score stand_pat = get_static_eval(board, state, prev_move);
+    Score stand_pat = -INF;
+    Score best_score = -INF;
 
-    if (stand_pat >= beta) return beta;
-    if (alpha < stand_pat) alpha = stand_pat;
+    if (!in_check)
+    {
+        stand_pat = get_static_eval(board, state);
+        best_score = stand_pat;
 
-    MoveList ml = board.generate_moves<GenType::CAPTURES>();
-    score_moves(board, ml, Move {}, state, 0, prev_move);
+        if (stand_pat >= beta)
+        {
+            state.tt->store(hash, 0, 0, stand_pat, Bound::LOWER, Move {});
+            return stand_pat;
+        }
+        if (alpha < stand_pat) alpha = stand_pat;
+    }
+
+    MoveList ml = in_check ? board.generate_moves<GenType::ALL>() : board.generate_moves<GenType::CAPTURES>();
+    score_moves(board, ml, tt_move, state, 0, prev_move);
+
+    Score original_alpha = alpha;
+    Move best_move = Move {};
 
     for (usize idx = 0; idx < ml.size(); ++idx)
     {
         pick_best(ml, idx);
-        if (ml[idx].score < Params::good_capture) break;
+        if (!in_check && ml[idx].score < 0) break;
 
         Move m = ml[idx].move;
 
@@ -416,11 +431,25 @@ Score qsearch(Board& board, Score alpha, Score beta, SearchState& state, Move pr
 
         if (state.stop && state.stop->load(std::memory_order_relaxed)) return 0;
 
-        if (score >= beta) return beta;
+        if (score > best_score)
+        {
+            best_score = score;
+            best_move = m;
+        }
+
+        if (score >= beta)
+        {
+            state.tt->store(hash, 0, 0, best_score, Bound::LOWER, best_move);
+            return best_score;
+        }
+
         if (score > alpha) alpha = score;
     }
 
-    return alpha;
+    Bound b = (best_score > original_alpha) ? Bound::EXACT : Bound::UPPER;
+    state.tt->store(hash, 0, 0, best_score, b, best_move);
+
+    return best_score;
 }
 
 Score negamax(
@@ -454,7 +483,7 @@ Score negamax(
 
     Move prev_move = board.ply > 0 ? board.history[board.ply - 1].move : Move {};
     bool in_check = board.in_check();
-    Score static_eval = in_check ? 0 : get_static_eval(board, state, prev_move);
+    Score static_eval = in_check ? 0 : get_static_eval(board, state);
     state.evals[ply] = static_eval;
 
     i16* ch_entry = nullptr;
@@ -572,9 +601,10 @@ Score negamax(
         if (m == excluded_move) continue;
 
         bool is_quiet = !m.is_capture() && !m.is_promotion();
+        bool is_killer = (m == state.killers[ply][0] || m == state.killers[ply][1]);
 
         // SEE Pruning.
-        if (best_score > -MATE_THRESHOLD && depth <= Params::see_pruning_max_depth && m != tt_move)
+        if (best_score > -MATE_THRESHOLD && depth <= Params::see_pruning_max_depth && m != tt_move && !is_killer)
         {
             if (!is_quiet && !see_ge(board, m, Params::see_capture_margin * depth)) continue;
             if (is_quiet && !see_ge(board, m, Params::see_quiet_margin * depth)) continue;
@@ -634,9 +664,17 @@ Score negamax(
         else
         {
             // Late Move Reductions.
-            if (depth >= 3 && moves_played >= 3 && is_quiet && !in_check && extension == 0)
+            if (depth >= 3 && moves_played >= 1 && is_quiet && !in_check && extension == 0)
             {
                 i32 R = LMR_TABLE[std::min(depth, 63)][std::min(moves_played, 63)];
+
+                if (!is_quiet)
+                {
+                    if (!see_ge(board, m, 0))
+                        R += 1;
+                    else
+                        R -= 1;
+                }
 
                 if (improving) R -= Params::lmr_improving_reduction;
 

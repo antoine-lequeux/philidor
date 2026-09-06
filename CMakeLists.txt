@@ -40,6 +40,8 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         "$<$<COMPILE_LANGUAGE:CXX>:-fno-rtti>"
     )
 
+    add_link_options("-fuse-ld=lld")
+
     option(USE_AVX512 "Compile with AVX-512 support" OFF)
     option(USE_NATIVE "Compile for the host architecture (-march=native)" ON)
 

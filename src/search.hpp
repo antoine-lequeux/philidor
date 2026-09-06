@@ -45,13 +45,13 @@ struct TunableRegistrar
     #define TUNABLE_PARAM(type, name, value, min, max) constexpr type name = value;
 #endif
 
-TUNABLE_PARAM(Score, tt_move_score, 20000, 10000, 30000)
-TUNABLE_PARAM(Score, promotion_bonus, 15000, 5000, 20000)
-TUNABLE_PARAM(Score, good_capture, 12000, 8000, 18000)
-TUNABLE_PARAM(Score, killer_score_0, 8000, 4000, 12000)
-TUNABLE_PARAM(Score, killer_score_1, 7000, 3000, 10000)
-TUNABLE_PARAM(Score, countermove_score, 6000, 3000, 10000)
-TUNABLE_PARAM(Score, bad_capture, -5000, -10000, -1000)
+TUNABLE_PARAM(Score, tt_move_score, 2000000, 1500000, 2500000)
+TUNABLE_PARAM(Score, promotion_bonus, 1500000, 1000000, 2000000)
+TUNABLE_PARAM(Score, good_capture, 1000000, 750000, 1250000)
+TUNABLE_PARAM(Score, killer_score_0, 600000, 450000, 750000)
+TUNABLE_PARAM(Score, killer_score_1, 500000, 400000, 600000)
+TUNABLE_PARAM(Score, countermove_score, 400000, 300000, 500000)
+TUNABLE_PARAM(Score, bad_capture, -1000000, -1250000, -750000)
 
 TUNABLE_PARAM(i32, lmr_base_100, 75, 40, 150)
 TUNABLE_PARAM(i32, lmr_divisor_100, 225, 150, 400)
@@ -102,7 +102,7 @@ TUNABLE_PARAM(i32, razoring_max_depth, 3, 1, 6)
 TUNABLE_PARAM(Score, razoring_margin, 200, 50, 400)
 
 TUNABLE_PARAM(i32, ch_weight, 16, 1, 32)
-TUNABLE_PARAM(Score, ch_cap, 300, 100, 1000)
+TUNABLE_PARAM(Score, ch_cap, 40, 20, 70)
 
 TUNABLE_PARAM(Score, see_capture_margin, -50, -200, 0)
 TUNABLE_PARAM(Score, see_quiet_margin, -50, -200, -5)
@@ -241,13 +241,12 @@ inline void iterative_deepening(Board& board, i32 max_depth, i64 hard_limit_ms, 
 
             if (score <= alpha)
             {
-                beta = (alpha + beta) / 2;
-                alpha = std::max(-INF, alpha - delta);
+                alpha = std::max(-MATE_VALUE, alpha - delta);
                 delta += delta / 2;
             }
             else if (score >= beta)
             {
-                beta = std::min(INF, beta + delta);
+                beta = std::min(MATE_VALUE, beta + delta);
                 delta += delta / 2;
             }
             else
