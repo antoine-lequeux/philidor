@@ -52,6 +52,13 @@ struct Board
 
     u64 zobrist_key() const { return (*history)[ply].hash; }
     bool in_check() const;
+    bool is_pseudo_legal(Move m) const;
+    bool is_legal(Move m);
+    constexpr bool is_capture(Move m) const
+    {
+        return pieces[m.get_target_square()] != EMPTY || m.get_flag() == Move::ENPASSANT_CAPTURE_FLAG;
+    }
+    constexpr bool is_quiet(Move m) const { return !is_capture(m) && !m.is_promotion(); }
     bool is_draw(i32 search_ply = 0) const;
 
     Bitboard occupied_by(Color color, Bitboard occ = ~0ULL) const;

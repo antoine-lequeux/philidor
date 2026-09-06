@@ -170,8 +170,6 @@ struct Move
 
     constexpr bool operator==(const Move& other) const = default;
 
-    constexpr bool is_capture() const { return (get_flag() & CAPTURE_FLAG) != 0; }
-
     std::string to_uci() const
     {
         auto idx_to_coord = [](Square idx) -> std::string {

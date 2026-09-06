@@ -167,7 +167,7 @@ score_moves(const Board& board, MoveList& ml, Move tt_move, const SearchState& s
         {
             sm.score = Params::tt_move_score;
         }
-        else if (m.is_capture())
+        else if (board.is_capture(m))
         {
             Square to = m.get_target_square();
             Square from = m.get_start_square();
@@ -178,27 +178,44 @@ score_moves(const Board& board, MoveList& ml, Move tt_move, const SearchState& s
             Type a_type = get_piece_type(attacker);
 
             sm.score = MVV_LVA[static_cast<usize>(v_type)][static_cast<usize>(a_type)];
-
-            // Capture history bonus.
             sm.score += state.capture_history[attacker][to][static_cast<usize>(v_type)];
 
-            if (see_ge(board, m, 0))
-                sm.score += Params::good_capture;
+            if (m.is_promotion())
+            {
+                Type promo = m.get_promotion_type();
+                if (promo == Type::QUEEN)
+                    sm.score += Params::promotion_bonus;
+                else if (promo == Type::KNIGHT)
+                    sm.score += Params::knight_promotion_score;
+                else
+                    sm.score += Params::bad_underpromotion_score;
+            }
             else
-                sm.score += Params::bad_capture;
+            {
+                if (see_ge(board, m, 0))
+                    sm.score += Params::good_capture;
+                else
+                    sm.score += Params::bad_capture;
+            }
         }
         else if (m.is_promotion())
         {
-            sm.score = Params::promotion_bonus + static_cast<Score>(m.get_promotion_type());
+            Type promo = m.get_promotion_type();
+            if (promo == Type::QUEEN)
+                sm.score = Params::promotion_bonus;
+            else if (promo == Type::KNIGHT)
+                sm.score = Params::knight_promotion_score;
+            else
+                sm.score = Params::bad_underpromotion_score;
         }
         else
         {
             // Quiet move ordering.
-            if (m == state.killers[ply][0])
+            if (ply < static_cast<i32>(MAX_PLY) && m == state.killers[ply][0])
             {
                 sm.score = Params::killer_score_0;
             }
-            else if (m == state.killers[ply][1])
+            else if (ply < static_cast<i32>(MAX_PLY) && m == state.killers[ply][1])
             {
                 sm.score = Params::killer_score_1;
             }
@@ -213,7 +230,8 @@ score_moves(const Board& board, MoveList& ml, Move tt_move, const SearchState& s
 
                 i32 score = state.history[us][m.from_to_index()];
 
-                if (prev_move.is_some()) score += state.cont_history[0][prev_piece][prev_to][piece][to];
+                if (prev_move.is_some())
+                    score += (state.cont_history[0][prev_piece][prev_to][piece][to] * Params::cont_hist_1_weight) / 100;
 
                 if (ply >= 2 && board.ply >= 2)
                 {
@@ -222,7 +240,7 @@ score_moves(const Board& board, MoveList& ml, Move tt_move, const SearchState& s
                     {
                         Piece gp_piece = gp_state.moved_piece;
                         Square gp_to = gp_state.move.get_target_square();
-                        score += state.cont_history[1][gp_piece][gp_to][piece][to];
+                        score += (state.cont_history[1][gp_piece][gp_to][piece][to] * Params::cont_hist_2_weight) / 100;
                     }
                 }
 
@@ -231,6 +249,243 @@ score_moves(const Board& board, MoveList& ml, Move tt_move, const SearchState& s
         }
     }
 }
+
+enum class Stage : u8
+{
+    TT_MOVE,
+    GEN_CAPTURES,
+    GOOD_CAPTURES,
+    KILLER_1,
+    KILLER_2,
+    COUNTERMOVE,
+    GEN_QUIETS,
+    QUIETS,
+    BAD_CAPTURES,
+    DONE
+};
+
+class MovePicker
+{
+public:
+
+    MovePicker(Board& b, Move tt_m, const SearchState& s, i32 p, Move prev_m)
+        : board(b), tt_move(tt_m), state(s), ply(p), prev_move(prev_m), stage(Stage::TT_MOVE)
+    {
+        if (prev_move.is_some())
+        {
+            prev_piece = board.pieces[prev_move.get_target_square()];
+            prev_to = prev_move.get_target_square();
+        }
+    }
+
+    Move next_move()
+    {
+        while (stage != Stage::DONE)
+        {
+            switch (stage)
+            {
+                case Stage::TT_MOVE:
+                {
+                    stage = Stage::GEN_CAPTURES;
+                    if (tt_move.is_some() && board.is_legal(tt_move))
+                    {
+                        tt_move_valid = true;
+                        return tt_move;
+                    }
+                    tt_move = Move {};
+                    break;
+                }
+                case Stage::GEN_CAPTURES:
+                {
+                    captures = board.generate_moves<GenType::CAPTURES>();
+                    score_captures();
+                    stage = Stage::GOOD_CAPTURES;
+                    break;
+                }
+                case Stage::GOOD_CAPTURES:
+                {
+                    while (cap_idx < captures.size())
+                    {
+                        pick_best(captures, cap_idx);
+                        if (captures[cap_idx].score < 0) break;
+                        Move m = captures[cap_idx++].move;
+                        if (tt_move_valid && m == tt_move) continue;
+                        return m;
+                    }
+                    stage = Stage::KILLER_1;
+                    break;
+                }
+                case Stage::KILLER_1:
+                {
+                    stage = Stage::KILLER_2;
+                    Move k1 = (ply < static_cast<i32>(MAX_PLY)) ? state.killers[ply][0] : Move {};
+                    if (k1.is_some() && (!tt_move_valid || k1 != tt_move) && board.is_quiet(k1) && board.is_legal(k1))
+                    {
+                        killer1 = k1;
+                        return k1;
+                    }
+                    break;
+                }
+                case Stage::KILLER_2:
+                {
+                    stage = Stage::COUNTERMOVE;
+                    Move k2 = (ply < static_cast<i32>(MAX_PLY)) ? state.killers[ply][1] : Move {};
+                    if (k2.is_some() && (!tt_move_valid || k2 != tt_move) && (!killer1.is_some() || k2 != killer1) &&
+                        board.is_quiet(k2) && board.is_legal(k2))
+                    {
+                        killer2 = k2;
+                        return k2;
+                    }
+                    break;
+                }
+                case Stage::COUNTERMOVE:
+                {
+                    stage = Stage::GEN_QUIETS;
+                    if (prev_move.is_some())
+                    {
+                        Move cm = state.countermoves[prev_piece][prev_to];
+                        if (cm.is_some() && (!tt_move_valid || cm != tt_move) &&
+                            (!killer1.is_some() || cm != killer1) && (!killer2.is_some() || cm != killer2) &&
+                            board.is_quiet(cm) && board.is_legal(cm))
+                        {
+                            countermove = cm;
+                            return cm;
+                        }
+                    }
+                    break;
+                }
+                case Stage::GEN_QUIETS:
+                {
+                    quiets = board.generate_moves<GenType::QUIETS>();
+                    score_quiets();
+                    stage = Stage::QUIETS;
+                    break;
+                }
+                case Stage::QUIETS:
+                {
+                    while (quiet_idx < quiets.size())
+                    {
+                        pick_best(quiets, quiet_idx);
+                        Move m = quiets[quiet_idx++].move;
+                        if (tt_move_valid && m == tt_move) continue;
+                        if (killer1.is_some() && m == killer1) continue;
+                        if (killer2.is_some() && m == killer2) continue;
+                        if (countermove.is_some() && m == countermove) continue;
+                        return m;
+                    }
+                    stage = Stage::BAD_CAPTURES;
+                    break;
+                }
+                case Stage::BAD_CAPTURES:
+                {
+                    while (cap_idx < captures.size())
+                    {
+                        pick_best(captures, cap_idx);
+                        Move m = captures[cap_idx++].move;
+                        if (tt_move_valid && m == tt_move) continue;
+                        return m;
+                    }
+                    stage = Stage::DONE;
+                    break;
+                }
+                case Stage::DONE: return Move {};
+            }
+        }
+        return Move {};
+    }
+
+private:
+
+    void score_captures()
+    {
+        for (ScoredMove& sm : captures)
+        {
+            Move m = sm.move;
+            Square to = m.get_target_square();
+            Square from = m.get_start_square();
+            Piece victim = board.pieces[to];
+            Piece attacker = board.pieces[from];
+
+            Type v_type = (victim == EMPTY) ? Type::PAWN : get_piece_type(victim);
+            Type a_type = get_piece_type(attacker);
+
+            Score score = 0;
+            if (board.is_capture(m))
+            {
+                score = MVV_LVA[static_cast<usize>(v_type)][static_cast<usize>(a_type)];
+                score += state.capture_history[attacker][to][static_cast<usize>(v_type)];
+            }
+
+            if (m.is_promotion())
+            {
+                Type promo = m.get_promotion_type();
+                if (promo == Type::QUEEN)
+                    score += Params::promotion_bonus;
+                else if (promo == Type::KNIGHT)
+                    score += Params::knight_promotion_score;
+                else
+                    score += Params::bad_underpromotion_score;
+            }
+            else
+            {
+                if (see_ge(board, m, 0))
+                    score += Params::good_capture;
+                else
+                    score += Params::bad_capture;
+            }
+            sm.score = score;
+        }
+    }
+
+    void score_quiets()
+    {
+        usize us = color_index(board.side_to_move);
+        for (ScoredMove& sm : quiets)
+        {
+            Move m = sm.move;
+            Piece piece = board.pieces[m.get_start_square()];
+            Square to = m.get_target_square();
+
+            i32 score = state.history[us][m.from_to_index()];
+
+            if (prev_move.is_some())
+                score += (state.cont_history[0][prev_piece][prev_to][piece][to] * Params::cont_hist_1_weight) / 100;
+
+            if (ply >= 2 && board.ply >= 2)
+            {
+                const State& gp_state = (*board.history)[board.ply - 2];
+                if (gp_state.move.is_some())
+                {
+                    Piece gp_piece = gp_state.moved_piece;
+                    Square gp_to = gp_state.move.get_target_square();
+                    score += (state.cont_history[1][gp_piece][gp_to][piece][to] * Params::cont_hist_2_weight) / 100;
+                }
+            }
+
+            sm.score = score;
+        }
+    }
+
+    Board& board;
+    Move tt_move;
+    const SearchState& state;
+    i32 ply;
+    Move prev_move;
+    Piece prev_piece = EMPTY;
+    Square prev_to = 0;
+
+    Stage stage;
+    bool tt_move_valid = false;
+    Move killer1 = Move {};
+    Move killer2 = Move {};
+    Move countermove = Move {};
+
+    MoveList captures;
+    usize cap_idx = 0;
+
+    MoveList quiets;
+    usize quiet_idx = 0;
+};
 
 constexpr i32 HISTORY_MAX = 16384;
 
@@ -291,7 +546,7 @@ inline void update_quiet_stats(
     }
 
     // Update killer moves.
-    if (!(best_move == state.killers[ply][0]))
+    if (ply < static_cast<i32>(MAX_PLY) && !(best_move == state.killers[ply][0]))
     {
         state.killers[ply][1] = state.killers[ply][0];
         state.killers[ply][0] = best_move;
@@ -625,8 +880,7 @@ Score negamax(
         }
     }
 
-    MoveList ml = board.generate_moves<GenType::ALL>();
-    score_moves(board, ml, tt_move, state, ply, prev_move);
+    MovePicker picker(board, tt_move, state, ply, prev_move);
 
     Move best_move {};
     Score best_score = -INF;
@@ -648,15 +902,14 @@ Score negamax(
     Move searched_captures[64];
     i32 capture_count = 0;
 
-    for (usize idx = 0; idx < ml.size(); ++idx)
+    Move m;
+    while ((m = picker.next_move()).is_some())
     {
-        pick_best(ml, idx);
-        Move m = ml[idx].move;
-
         if (m == excluded_move) continue;
 
-        bool is_quiet = !m.is_capture() && !m.is_promotion();
-        bool is_killer = (m == state.killers[ply][0] || m == state.killers[ply][1]);
+        bool is_quiet = board.is_quiet(m);
+        bool is_killer =
+            (ply < static_cast<i32>(MAX_PLY)) && (m == state.killers[ply][0] || m == state.killers[ply][1]);
         bool is_countermove =
             prev_move.is_some() &&
             (m == state.countermoves[board.pieces[prev_move.get_target_square()]][prev_move.get_target_square()]);
@@ -788,7 +1041,7 @@ Score negamax(
         if (state.stop && state.stop->load(std::memory_order_relaxed)) return 0;
 
         if (is_quiet && quiet_count < 64) searched_quiets[quiet_count++] = m;
-        if (m.is_capture() && capture_count < 64) searched_captures[capture_count++] = m;
+        if (board.is_capture(m) && capture_count < 64) searched_captures[capture_count++] = m;
 
         moves_played++;
 
@@ -810,7 +1063,7 @@ Score negamax(
 
             if (is_quiet)
                 update_quiet_stats(state, board, m, depth, ply, prev_move, searched_quiets, quiet_count);
-            else if (m.is_capture())
+            else if (board.is_capture(m))
                 update_capture_stats(state, board, m, depth, searched_captures, capture_count);
 
             break;
@@ -861,25 +1114,17 @@ RootResult search_root(Board& board, i32 depth, Score alpha, Score beta, SearchS
     std::optional<TTEntry> tt_entry = state.tt->probe(hash, 0);
     Move tt_move = tt_entry ? tt_entry->move : Move {};
 
-    MoveList ml = board.generate_moves<GenType::ALL>();
-    if (ml.empty())
-    {
-        result.score = board.in_check() ? -MATE_VALUE : 0;
-        result.completed = true;
-        return result;
-    }
-
-    score_moves(board, ml, tt_move, state, 0, Move {});
+    MovePicker picker(board, tt_move, state, 0, Move {});
 
     Score best_score = -INF;
-    Move best_move = tt_move.is_some() ? tt_move : ml[0].move;
+    Move best_move = (tt_move.is_some() && board.is_legal(tt_move)) ? tt_move : Move {};
     Bound bound = Bound::UPPER;
     i32 moves_played = 0;
 
-    for (usize idx = 0; idx < ml.size(); ++idx)
+    Move m;
+    while ((m = picker.next_move()).is_some())
     {
-        pick_best(ml, idx);
-        Move m = ml[idx].move;
+        if (moves_played == 0 && best_move.is_null()) best_move = m;
         board.make_move(m);
 
         Score score;
@@ -928,6 +1173,13 @@ RootResult search_root(Board& board, i32 depth, Score alpha, Score beta, SearchS
             bound = Bound::LOWER;
             break;
         }
+    }
+
+    if (moves_played == 0)
+    {
+        result.score = board.in_check() ? -MATE_VALUE : 0;
+        result.completed = true;
+        return result;
     }
 
     state.tt->store(hash, depth, 0, best_score, bound, best_move);

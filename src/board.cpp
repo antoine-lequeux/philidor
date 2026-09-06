@@ -237,6 +237,154 @@ bool Board::in_check() const
     return is_in_check(*this, side_to_move);
 }
 
+bool Board::is_pseudo_legal(Move m) const
+{
+    if (m.is_null()) return false;
+
+    const Square from = m.get_start_square();
+    const Square to = m.get_target_square();
+
+    if (from >= 64 || to >= 64 || from == to) return false;
+
+    const Piece pc = pieces[from];
+    if (pc == EMPTY || get_piece_color(pc) != side_to_move) return false;
+
+    const Piece dest = pieces[to];
+    if (dest != EMPTY)
+    {
+        if (get_piece_color(dest) == side_to_move) return false;
+        if (get_piece_type(dest) == Type::KING) return false;
+    }
+
+    const Type pt = get_piece_type(pc);
+    const u16 flag = m.get_flag();
+    const Color us = side_to_move;
+
+    if (pt == Type::PAWN)
+    {
+        const u64 to_bb = 1ULL << to;
+        const u64 promo_rank = (us == Color::WHITE) ? RANK_8 : RANK_1;
+        const bool is_promo = (to_bb & promo_rank) != 0;
+
+        if (is_promo)
+        {
+            if (flag != Move::PROMOTE_TO_QUEEN_FLAG && flag != Move::PROMOTE_TO_KNIGHT_FLAG &&
+                flag != Move::PROMOTE_TO_ROOK_FLAG && flag != Move::PROMOTE_TO_BISHOP_FLAG)
+                return false;
+        }
+        else
+        {
+            if (flag != 0 && flag != Move::ENPASSANT_CAPTURE_FLAG && flag != Move::PAWN_TWO_UP_FLAG) return false;
+        }
+
+        if (flag == Move::ENPASSANT_CAPTURE_FLAG)
+        {
+            const Square ep_sq = (*history)[ply].ep_square;
+            if (to != ep_sq || ep_sq == NO_SQUARE) return false;
+            return (pawn_attacks(from, us) & to_bb) != 0;
+        }
+
+        if (flag == Move::PAWN_TWO_UP_FLAG)
+        {
+            if (dest != EMPTY) return false;
+            if (us == Color::WHITE)
+            {
+                if (from / 8 != 1 || to != from + 16) return false;
+                if (pieces[from + 8] != EMPTY) return false;
+            }
+            else
+            {
+                if (from / 8 != 6 || to != from - 16) return false;
+                if (pieces[from - 8] != EMPTY) return false;
+            }
+            return true;
+        }
+
+        const Square push_sq = (us == Color::WHITE) ? from + 8 : from - 8;
+        if (to == push_sq) return dest == EMPTY;
+
+        if (pawn_attacks(from, us) & to_bb) return dest != EMPTY;
+
+        return false;
+    }
+
+    if (m.is_promotion()) return false;
+    if (flag != 0 && (pt != Type::KING || flag != Move::CASTLE_FLAG)) return false;
+
+    if (pt == Type::KNIGHT) return (knight_attacks(from) & (1ULL << to)) != 0;
+
+    if (pt == Type::BISHOP) return (bishop_attacks(from, occupancy) & (1ULL << to)) != 0;
+
+    if (pt == Type::ROOK) return (rook_attacks(from, occupancy) & (1ULL << to)) != 0;
+
+    if (pt == Type::QUEEN)
+        return ((bishop_attacks(from, occupancy) | rook_attacks(from, occupancy)) & (1ULL << to)) != 0;
+
+    if (pt == Type::KING)
+    {
+        if (flag == Move::CASTLE_FLAG)
+        {
+            const CastlingRights cr = (*history)[ply].castling_rights;
+            if (in_check()) return false;
+
+            if (us == Color::WHITE)
+            {
+                if (from != 4) return false;
+                if (to == 6)
+                {
+                    if ((cr & CastlingRights::WK) == CastlingRights::NONE) return false;
+                    if (occupancy & WHITE_OO_BLOCKERS) return false;
+                    if (is_attacked_by<Color::BLACK>(*this, 5, occupancy)) return false;
+                    if (is_attacked_by<Color::BLACK>(*this, 6, occupancy)) return false;
+                    return true;
+                }
+                if (to == 2)
+                {
+                    if ((cr & CastlingRights::WQ) == CastlingRights::NONE) return false;
+                    if (occupancy & WHITE_OOO_BLOCKERS) return false;
+                    if (is_attacked_by<Color::BLACK>(*this, 3, occupancy)) return false;
+                    if (is_attacked_by<Color::BLACK>(*this, 2, occupancy)) return false;
+                    return true;
+                }
+            }
+            else
+            {
+                if (from != 60) return false;
+                if (to == 62)
+                {
+                    if ((cr & CastlingRights::BK) == CastlingRights::NONE) return false;
+                    if (occupancy & BLACK_OO_BLOCKERS) return false;
+                    if (is_attacked_by<Color::WHITE>(*this, 61, occupancy)) return false;
+                    if (is_attacked_by<Color::WHITE>(*this, 62, occupancy)) return false;
+                    return true;
+                }
+                if (to == 58)
+                {
+                    if ((cr & CastlingRights::BQ) == CastlingRights::NONE) return false;
+                    if (occupancy & BLACK_OOO_BLOCKERS) return false;
+                    if (is_attacked_by<Color::WHITE>(*this, 59, occupancy)) return false;
+                    if (is_attacked_by<Color::WHITE>(*this, 58, occupancy)) return false;
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        return (king_attacks(from) & (1ULL << to)) != 0;
+    }
+
+    return false;
+}
+
+bool Board::is_legal(Move m)
+{
+    if (!is_pseudo_legal(m)) return false;
+    make_move(m);
+    bool legal = !is_in_check(*this, !side_to_move);
+    unmake_move(m);
+    return legal;
+}
+
 bool Board::is_draw(i32 search_ply) const
 {
     if ((*history)[ply].halfmove_clock >= 100) return true;

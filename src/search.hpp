@@ -47,11 +47,13 @@ struct TunableRegistrar
 
 TUNABLE_PARAM(Score, tt_move_score, 2000000, 1500000, 2500000)
 TUNABLE_PARAM(Score, promotion_bonus, 1500000, 1000000, 2000000)
+TUNABLE_PARAM(Score, knight_promotion_score, 800000, 500000, 1200000)
 TUNABLE_PARAM(Score, good_capture, 1000000, 750000, 1250000)
 TUNABLE_PARAM(Score, killer_score_0, 600000, 450000, 750000)
 TUNABLE_PARAM(Score, killer_score_1, 500000, 400000, 600000)
 TUNABLE_PARAM(Score, countermove_score, 400000, 300000, 500000)
 TUNABLE_PARAM(Score, bad_capture, -1000000, -1250000, -750000)
+TUNABLE_PARAM(Score, bad_underpromotion_score, -500000, -1000000, 0)
 
 TUNABLE_PARAM(i32, lmr_base_100, 75, 40, 150)
 TUNABLE_PARAM(i32, lmr_divisor_100, 225, 150, 400)
@@ -61,8 +63,8 @@ TUNABLE_PARAM(i32, lmr_capture_moves, 4, 2, 8)
 
 TUNABLE_PARAM(i32, history_bonus_max, 400, 200, 1000)
 TUNABLE_PARAM(i32, history_bonus_mult, 4, 1, 8)
-TUNABLE_PARAM(i32, statscore_divisor, 120, 50, 400)
-TUNABLE_PARAM(Score, statscore_max_bonus, 100, 50, 400)
+TUNABLE_PARAM(i32, cont_hist_1_weight, 100, 20, 200)
+TUNABLE_PARAM(i32, cont_hist_2_weight, 50, 10, 100)
 
 TUNABLE_PARAM(i32, capture_history_bonus_max, 300, 100, 1000)
 TUNABLE_PARAM(i32, capture_history_bonus_mult, 4, 1, 10)
