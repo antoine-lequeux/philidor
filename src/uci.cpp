@@ -5,6 +5,7 @@
 #include "search.hpp"
 #include "tt.hpp"
 
+#include <algorithm>
 #include <atomic>
 #include <iostream>
 #include <iterator>
@@ -81,6 +82,7 @@ void uci_loop()
     auto main_state = std::make_unique<SearchState>();
     main_state->tt = tt.get();
     main_state->stop = &stop_search;
+    u64 move_overhead_ms = 25;
 
     std::string line;
     while (std::getline(std::cin, line))
@@ -102,6 +104,7 @@ void uci_loop()
             std::cout << "id name Philidor\n";
             std::cout << "id author Antoine Lequeux\n";
             std::cout << "option name Hash type spin default 64 min 1 max 65536\n";
+            std::cout << "option name Move Overhead type spin default 25 min 0 max 5000\n";
 #ifdef TUNE_BUILD
             for (const auto& param : Params::tunable_registry())
             {
@@ -124,6 +127,10 @@ void uci_loop()
                     usize mb = std::stoull(tokens[4]);
                     tt = std::make_unique<TranspositionTable>(mb);
                     main_state->tt = tt.get();
+                }
+                else if (tokens.size() >= 6 && tokens[2] == "Move" && tokens[3] == "Overhead" && tokens[4] == "value")
+                {
+                    move_overhead_ms = std::stoull(tokens[5]);
                 }
 #ifdef TUNE_BUILD
                 else if (tokens[3] == "value")
@@ -211,6 +218,7 @@ void uci_loop()
             u64 time_limit_ms = 0;
 
             u64 wtime = 0, btime = 0, winc = 0, binc = 0;
+            u64 movestogo = 0;
             bool infinite = false;
 
             bool skip_search = false;
@@ -235,6 +243,8 @@ void uci_loop()
                     winc = std::stoull(tokens[++i]);
                 else if (tokens[i] == "binc" && i + 1 < tokens.size())
                     binc = std::stoull(tokens[++i]);
+                else if (tokens[i] == "movestogo" && i + 1 < tokens.size())
+                    movestogo = std::stoull(tokens[++i]);
                 else if (tokens[i] == "movetime" && i + 1 < tokens.size())
                 {
                     time_limit_ms = std::stoull(tokens[++i]);
@@ -255,14 +265,15 @@ void uci_loop()
                 u64 our_time = (board.side_to_move == Color::WHITE) ? wtime : btime;
                 u64 our_inc = (board.side_to_move == Color::WHITE) ? winc : binc;
 
-                constexpr u64 move_overhead = 10;
-                u64 usable_time = (our_time > move_overhead) ? (our_time - move_overhead) : 1;
+                u64 usable_time = (our_time > move_overhead_ms) ? (our_time - move_overhead_ms) : 1;
+                u64 moves_to_go = (movestogo > 0) ? std::min<u64>(movestogo, 50) : 25;
 
-                u64 base = (usable_time / 30) + (our_inc * 3 / 4);
+                u64 base = (usable_time / moves_to_go) + (our_inc * 3 / 4);
 
-                soft_limit_ms = static_cast<i64>(std::max<u64>(1, base));
-                hard_limit_ms = static_cast<i64>(std::min<u64>(usable_time, base * 3));
-                hard_limit_ms = std::max<i64>(1, hard_limit_ms);
+                soft_limit_ms = static_cast<i64>(std::clamp<u64>(base, 1, (usable_time * 60) / 100));
+
+                hard_limit_ms =
+                    static_cast<i64>(std::clamp<u64>(base * 3, 1, std::max<u64>(1, (usable_time * 80) / 100)));
             }
 
             if (!skip_search)

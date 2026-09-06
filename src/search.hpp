@@ -5,6 +5,7 @@
 #include "movelist.hpp"
 #include "tt.hpp"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstring>
@@ -150,6 +151,8 @@ struct SearchState
     TranspositionTable* tt = nullptr;
     i64 start_time = 0;
     i64 hard_time_limit_ms = 999999999;
+    i64 soft_time_limit_ms = 999999999;
+    u32 check_mask = 1023;
     std::atomic_bool* stop = nullptr;
 
     // Killer moves (2 slots per ply).
@@ -188,7 +191,7 @@ struct SearchState
     {
         if (!stop) return false;
         if (stop->load(std::memory_order_relaxed)) return true;
-        if ((nodes & 2047) == 0)
+        if ((nodes & check_mask) == 0)
         {
             if (now_ms() - start_time >= hard_time_limit_ms)
             {
@@ -202,9 +205,11 @@ struct SearchState
 
 struct RootResult
 {
-    Score score;
-    Move best_move;
-    bool completed;
+    Score score = -INF;
+    Move best_move = Move {};
+    bool completed = false;
+    i64 best_move_nodes = 0;
+    i64 total_nodes = 0;
 };
 
 RootResult search_root(Board& board, i32 depth, Score alpha, Score beta, SearchState& state);
@@ -214,9 +219,24 @@ inline void iterative_deepening(Board& board, i32 max_depth, i64 hard_limit_ms, 
     state->nodes = 0;
     state->start_time = now_ms();
     state->hard_time_limit_ms = hard_limit_ms;
+    state->soft_time_limit_ms = soft_limit_ms;
+    state->check_mask = (hard_limit_ms < 500) ? 511 : 1023;
+
+    MoveList root_moves = board.generate_moves<GenType::ALL>();
+    if (root_moves.empty())
+    {
+        std::cout << "bestmove (none)" << std::endl;
+        return;
+    }
+    if (root_moves.size() == 1 && soft_limit_ms < 900000000) max_depth = 1;
 
     Move best_move = Move {};
     Score score = 0;
+
+    Move last_best_move = Move {};
+    Score last_score = 0;
+    i32 best_move_stability = 0;
+    i64 last_iter_end_time = state->start_time;
 
     for (i32 depth = 1; depth <= max_depth; depth++)
     {
@@ -233,6 +253,8 @@ inline void iterative_deepening(Board& board, i32 max_depth, i64 hard_limit_ms, 
         Move iter_best_move = Move {};
         Score iter_score = 0;
         bool iter_completed = false;
+        i64 iter_bm_nodes = 0;
+        i64 iter_total_nodes = 0;
 
         while (true)
         {
@@ -241,6 +263,8 @@ inline void iterative_deepening(Board& board, i32 max_depth, i64 hard_limit_ms, 
 
             iter_score = res.score;
             iter_best_move = res.best_move;
+            iter_bm_nodes = res.best_move_nodes;
+            iter_total_nodes = res.total_nodes;
 
             if (iter_score <= alpha)
             {
@@ -262,10 +286,7 @@ inline void iterative_deepening(Board& board, i32 max_depth, i64 hard_limit_ms, 
         if (state->stop && state->stop->load(std::memory_order_relaxed))
         {
             if (depth == 1 && best_move.is_null())
-            {
-                MoveList ml = board.generate_moves<GenType::ALL>();
-                best_move = iter_best_move.is_null() ? (ml.empty() ? Move {} : ml[0].move) : iter_best_move;
-            }
+                best_move = iter_best_move.is_null() ? root_moves[0].move : iter_best_move;
             break;
         }
 
@@ -274,7 +295,11 @@ inline void iterative_deepening(Board& board, i32 max_depth, i64 hard_limit_ms, 
         best_move = iter_best_move;
         score = iter_score;
 
-        i64 elapsed = now_ms() - state->start_time;
+        i64 now = now_ms();
+        i64 elapsed = now - state->start_time;
+        i64 iter_duration = now - last_iter_end_time;
+        last_iter_end_time = now;
+
         i64 nps = elapsed > 0 ? (state->nodes * 1000) / elapsed : 0;
 
         std::string score_str;
@@ -325,14 +350,66 @@ inline void iterative_deepening(Board& board, i32 max_depth, i64 hard_limit_ms, 
         }
         std::cout << std::endl;
 
+        if (std::abs(score) >= MATE_THRESHOLD)
+        {
+            i32 mate_plies = MATE_VALUE - std::abs(score);
+            if (depth >= mate_plies) break;
+        }
+
+        bool bm_changed = (depth > 1 && best_move != last_best_move);
+        if (depth == 1)
+            best_move_stability = 1;
+        else if (!bm_changed)
+            best_move_stability++;
+        else
+            best_move_stability = 1;
+
         if (state->time_up()) break;
-        if (now_ms() - state->start_time >= soft_limit_ms) break;
+
+        i64 adjusted_soft_limit = soft_limit_ms;
+        if (soft_limit_ms < hard_limit_ms)
+        {
+            f64 time_mult = 1.0;
+            if (depth >= 6)
+            {
+                if (bm_changed)
+                    time_mult *= 1.30;
+                else if (best_move_stability >= 4)
+                    time_mult *= 0.75;
+
+                if (score < last_score - 30)
+                    time_mult *= 1.35;
+                else if (score > last_score + 30)
+                    time_mult *= 0.85;
+
+                if (iter_total_nodes > 0)
+                {
+                    f64 bm_frac = static_cast<f64>(iter_bm_nodes) / static_cast<f64>(iter_total_nodes);
+                    if (bm_frac > 0.75)
+                        time_mult *= 0.80;
+                    else if (bm_frac < 0.25)
+                        time_mult *= 1.20;
+                }
+            }
+
+            time_mult = std::clamp(time_mult, 0.5, 2.5);
+            adjusted_soft_limit = static_cast<i64>(static_cast<f64>(soft_limit_ms) * time_mult);
+            adjusted_soft_limit = std::min(adjusted_soft_limit, static_cast<i64>(hard_limit_ms * 85 / 100));
+            adjusted_soft_limit = std::max<i64>(1, adjusted_soft_limit);
+        }
+
+        last_best_move = best_move;
+        last_score = score;
+
+        if (elapsed >= adjusted_soft_limit) break;
+
+        if (depth >= 6 && (elapsed + static_cast<i64>(static_cast<f64>(iter_duration) * 1.8) > adjusted_soft_limit))
+            break;
     }
 
     if (best_move.is_null())
     {
-        MoveList ml = board.generate_moves<GenType::ALL>();
-        if (!ml.empty()) best_move = ml[0].move;
+        if (!root_moves.empty()) best_move = root_moves[0].move;
     }
 
     std::cout << "bestmove " << best_move.to_uci() << std::endl;

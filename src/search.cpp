@@ -1119,6 +1119,10 @@ RootResult search_root(Board& board, i32 depth, Score alpha, Score beta, SearchS
     RootResult result;
     result.score = -INF;
     result.completed = false;
+    result.best_move_nodes = 0;
+    result.total_nodes = 0;
+
+    i64 root_start_nodes = state.nodes;
 
     u64 hash = board.zobrist_key();
     std::optional<TTEntry> tt_entry = state.tt->probe(hash, 0);
@@ -1138,6 +1142,7 @@ RootResult search_root(Board& board, i32 depth, Score alpha, Score beta, SearchS
 
     Score best_score = -INF;
     Move best_move = (tt_move.is_some() && board.is_legal(tt_move)) ? tt_move : Move {};
+    i64 best_move_nodes = 0;
     Bound bound = Bound::UPPER;
     i32 moves_played = 0;
 
@@ -1147,6 +1152,7 @@ RootResult search_root(Board& board, i32 depth, Score alpha, Score beta, SearchS
         if (moves_played == 0 && best_move.is_null()) best_move = m;
         board.make_move(m);
 
+        i64 move_start_nodes = state.nodes;
         Score score;
 
         if (moves_played == 0)
@@ -1163,6 +1169,7 @@ RootResult search_root(Board& board, i32 depth, Score alpha, Score beta, SearchS
         }
 
         board.unmake_move(m);
+        i64 nodes_this_move = state.nodes - move_start_nodes;
 
         if (state.stop && state.stop->load(std::memory_order_relaxed))
         {
@@ -1170,16 +1177,19 @@ RootResult search_root(Board& board, i32 depth, Score alpha, Score beta, SearchS
             {
                 result.score = best_score;
                 result.best_move = best_move;
+                result.best_move_nodes = best_move_nodes;
+                result.total_nodes = state.nodes - root_start_nodes;
             }
             return result;
         }
 
         moves_played++;
 
-        if (score > best_score)
+        if (score > best_score || moves_played == 1)
         {
             best_score = score;
             best_move = m;
+            best_move_nodes = nodes_this_move;
         }
 
         if (score > alpha)
@@ -1199,6 +1209,8 @@ RootResult search_root(Board& board, i32 depth, Score alpha, Score beta, SearchS
     {
         result.score = board.in_check() ? -MATE_VALUE : 0;
         result.completed = true;
+        result.best_move_nodes = 0;
+        result.total_nodes = state.nodes - root_start_nodes;
         return result;
     }
 
@@ -1207,6 +1219,8 @@ RootResult search_root(Board& board, i32 depth, Score alpha, Score beta, SearchS
     result.score = best_score;
     result.best_move = best_move;
     result.completed = true;
+    result.best_move_nodes = best_move_nodes;
+    result.total_nodes = state.nodes - root_start_nodes;
 
     return result;
 }
