@@ -269,6 +269,19 @@ constexpr Bitboard WHITE_OOO_BLOCKERS = 0x0EULL; // b1, c1, d1
 constexpr Bitboard BLACK_OO_BLOCKERS = 0x6000000000000000ULL;  // f8, g8
 constexpr Bitboard BLACK_OOO_BLOCKERS = 0x0E00000000000000ULL; // b8, c8, d8
 
+constexpr Bitboard DARK_SQUARES = 0xAA55AA55AA55AA55ULL;
+constexpr Bitboard LIGHT_SQUARES = 0x55AA55AA55AA55AAULL;
+
+constexpr Bitboard A8_CORNER_ZONE = 0x0707000000000000ULL; // a8, b8, c8, a7, b7, c7
+constexpr Bitboard H8_CORNER_ZONE = 0xE0E0000000000000ULL; // f8, g8, h8, f7, g7, h7
+constexpr Bitboard A1_CORNER_ZONE = 0x0000000000000707ULL; // a1, b1, c1, a2, b2, c2
+constexpr Bitboard H1_CORNER_ZONE = 0x000000000000E0E0ULL; // f1, g1, h1, f2, g2, h2
+
+constexpr Bitboard A8_ROOK_DRAW_SQUARES = 0x0300000000000000ULL; // a8, b8
+constexpr Bitboard H8_ROOK_DRAW_SQUARES = 0xC000000000000000ULL; // g8, h8
+constexpr Bitboard A1_ROOK_DRAW_SQUARES = 0x0000000000000003ULL; // a1, b1
+constexpr Bitboard H1_ROOK_DRAW_SQUARES = 0x00000000000000C0ULL; // g1, h1
+
 enum class GenType
 {
     CAPTURES,

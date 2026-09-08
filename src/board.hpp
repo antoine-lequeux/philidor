@@ -69,6 +69,7 @@ struct Board
     {
         return (passed_pawn_mask(sq, c) & piece_bb[bb_index(Type::PAWN, color_index(!c))]) == 0;
     }
+    bool is_material_draw() const;
     bool is_draw(i32 search_ply = 0) const;
 
     Bitboard occupied_by(Color color, Bitboard occ = ~0ULL) const;

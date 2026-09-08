@@ -120,6 +120,9 @@ TUNABLE_PARAM(Score, see_capture_margin, -50, -200, 0)
 TUNABLE_PARAM(Score, see_quiet_margin, -50, -200, -5)
 TUNABLE_PARAM(i32, see_pruning_max_depth, 8, 2, 12)
 
+TUNABLE_PARAM(Score, draw_contempt_max, 20, 0, 50)
+TUNABLE_PARAM(Score, draw_contempt_divisor, 32, 16, 64)
+
 #ifdef TUNE_BUILD
 inline void print_optuna_json()
 {
@@ -205,6 +208,18 @@ struct SearchState
         return false;
     }
 };
+
+inline Score draw_score(const SearchState& state, i32 ply)
+{
+    Score root_eval = state.evals[0];
+    if (std::abs(root_eval) >= MATE_THRESHOLD) root_eval = 0;
+    const Score div = std::max<Score>(1, Params::draw_contempt_divisor);
+    Score contempt = -root_eval / div;
+    contempt = std::clamp(
+        contempt, static_cast<Score>(-Params::draw_contempt_max), static_cast<Score>(Params::draw_contempt_max)
+    );
+    return ((ply & 1) == 0) ? contempt : -contempt;
+}
 
 struct RootResult
 {
