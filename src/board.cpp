@@ -387,9 +387,104 @@ bool Board::is_legal(Move m)
     return legal;
 }
 
+bool Board::is_material_draw() const
+{
+    const Bitboard w_rooks = piece_bb[bb_index(Type::ROOK, Color::WHITE)];
+    const Bitboard b_rooks = piece_bb[bb_index(Type::ROOK, Color::BLACK)];
+    const Bitboard w_queens = piece_bb[bb_index(Type::QUEEN, Color::WHITE)];
+    const Bitboard b_queens = piece_bb[bb_index(Type::QUEEN, Color::BLACK)];
+
+    if ((w_rooks | b_rooks | w_queens | b_queens) != 0) return false;
+
+    if (in_check()) return false;
+
+    const Bitboard w_pawns = piece_bb[bb_index(Type::PAWN, Color::WHITE)];
+    const Bitboard b_pawns = piece_bb[bb_index(Type::PAWN, Color::BLACK)];
+    const Bitboard pawns = w_pawns | b_pawns;
+
+    const Bitboard w_knights = piece_bb[bb_index(Type::KNIGHT, Color::WHITE)];
+    const Bitboard b_knights = piece_bb[bb_index(Type::KNIGHT, Color::BLACK)];
+    const Bitboard w_bishops = piece_bb[bb_index(Type::BISHOP, Color::WHITE)];
+    const Bitboard b_bishops = piece_bb[bb_index(Type::BISHOP, Color::BLACK)];
+
+    if (pawns != 0)
+    {
+        if (w_pawns != 0 && b_pawns != 0) return false;
+
+        if ((w_knights | b_knights) != 0) return false;
+
+        if (w_pawns != 0)
+        {
+            if (color_bb[1] != (1ULL << kings[1])) return false;
+
+            const Bitboard bk_bb = 1ULL << kings[1];
+
+            if ((w_pawns & ~FILE_A) == 0)
+            {
+                if (std::popcount(w_bishops) == 1 && (w_bishops & DARK_SQUARES) != 0 && (bk_bb & A8_CORNER_ZONE) != 0)
+                    return true;
+                if (w_bishops == 0 && (bk_bb & A8_ROOK_DRAW_SQUARES) != 0) return true;
+            }
+            else if ((w_pawns & ~FILE_H) == 0)
+            {
+                if (std::popcount(w_bishops) == 1 && (w_bishops & LIGHT_SQUARES) != 0 && (bk_bb & H8_CORNER_ZONE) != 0)
+                    return true;
+                if (w_bishops == 0 && (bk_bb & H8_ROOK_DRAW_SQUARES) != 0) return true;
+            }
+            return false;
+        }
+        else
+        {
+            if (color_bb[0] != (1ULL << kings[0])) return false;
+
+            const Bitboard wk_bb = 1ULL << kings[0];
+
+            if ((b_pawns & ~FILE_A) == 0)
+            {
+                if (std::popcount(b_bishops) == 1 && (b_bishops & LIGHT_SQUARES) != 0 && (wk_bb & A1_CORNER_ZONE) != 0)
+                    return true;
+                if (b_bishops == 0 && (wk_bb & A1_ROOK_DRAW_SQUARES) != 0) return true;
+            }
+            else if ((b_pawns & ~FILE_H) == 0)
+            {
+                if (std::popcount(b_bishops) == 1 && (b_bishops & DARK_SQUARES) != 0 && (wk_bb & H1_CORNER_ZONE) != 0)
+                    return true;
+                if (b_bishops == 0 && (wk_bb & H1_ROOK_DRAW_SQUARES) != 0) return true;
+            }
+            return false;
+        }
+    }
+
+    const u32 wn = static_cast<u32>(std::popcount(w_knights));
+    const u32 wb = static_cast<u32>(std::popcount(w_bishops));
+    const u32 bn = static_cast<u32>(std::popcount(b_knights));
+    const u32 bb = static_cast<u32>(std::popcount(b_bishops));
+
+    const u32 w_minors = wn + wb;
+    const u32 b_minors = bn + bb;
+
+    // K vs K
+    if (w_minors == 0 && b_minors == 0) return true;
+
+    // KN vs K, KB vs K, K vs KN, K vs KB
+    if (w_minors + b_minors == 1) return true;
+
+    // KN vs KN, KB vs KN, KN vs KB, KB vs KB
+    if (w_minors == 1 && b_minors == 1) return true;
+
+    // KNN vs K
+    if (w_minors == 2 && b_minors == 0 && wn == 2) return true;
+
+    // K vs KNN
+    if (w_minors == 0 && b_minors == 2 && bn == 2) return true;
+
+    return false;
+}
+
 bool Board::is_draw(i32 search_ply) const
 {
     if ((*history)[ply].halfmove_clock >= 100) return true;
+    if (is_material_draw()) return true;
     if (ply < 2) return false;
 
     u64 current_hash = (*history)[ply].hash;
@@ -477,6 +572,7 @@ void Board::ensure_accumulator() const
 
 Score Board::evaluate() const
 {
+    if (is_material_draw()) return 0;
     ensure_accumulator();
     return NNUE::evaluate((*history)[ply].acc, side_to_move);
 }

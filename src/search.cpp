@@ -616,7 +616,7 @@ Score qsearch(Board& board, Score alpha, Score beta, SearchState& state, i32 ply
 {
     if (state.time_up()) return 0;
 
-    if (ply > 0 && board.is_draw(ply)) return 0;
+    if (ply > 0 && board.is_draw(ply)) return draw_score(state, ply);
 
     if (ply >= static_cast<i32>(MAX_PLY) - 1) return board.evaluate();
 
@@ -731,7 +731,7 @@ Score negamax(
 
     state.nodes++;
 
-    if (ply > 0 && board.is_draw(ply)) return 0;
+    if (ply > 0 && board.is_draw(ply)) return draw_score(state, ply);
 
     if (ply >= static_cast<i32>(MAX_PLY) - 1) return board.evaluate();
 
@@ -1112,7 +1112,7 @@ Score negamax(
         if (board.in_check())
             return -MATE_VALUE + ply;
         else
-            return 0;
+            return draw_score(state, ply);
     }
 
     state.tt->store(hash, depth, ply, best_score, bound, best_move, !in_check ? static_eval : NO_EVAL);
