@@ -2,6 +2,7 @@
 
 #include "defines.hpp"
 
+#include <algorithm>
 #include <array>
 
 namespace priv
@@ -132,6 +133,27 @@ constexpr auto KING_ATTACKS = build_king_attacks();
 constexpr auto PAWN_ATTACKS = build_pawn_attacks();
 constexpr auto BETWEEN = build_between();
 constexpr auto LINE = build_line();
+
+constexpr std::array<std::array<Bitboard, 64>, 2> build_passed_pawn_masks()
+{
+    std::array<std::array<Bitboard, 64>, 2> masks {};
+    for (u32 sq = 0; sq < 64; ++sq)
+    {
+        i32 r = static_cast<i32>(sq / 8);
+        i32 f = static_cast<i32>(sq % 8);
+
+        for (i32 rr = r + 1; rr < 8; ++rr)
+            for (i32 ff = std::max(0, f - 1); ff <= std::min(7, f + 1); ++ff)
+                masks[0][sq] |= (1ULL << static_cast<u32>(rr * 8 + ff));
+
+        for (i32 rr = 0; rr < r; ++rr)
+            for (i32 ff = std::max(0, f - 1); ff <= std::min(7, f + 1); ++ff)
+                masks[1][sq] |= (1ULL << static_cast<u32>(rr * 8 + ff));
+    }
+    return masks;
+}
+
+constexpr auto PASSED_PAWN_MASKS = build_passed_pawn_masks();
 } // namespace priv
 
 constexpr Bitboard knight_attacks(Square sq)
@@ -151,6 +173,13 @@ constexpr Bitboard pawn_attacks(Square sq, Color color)
 {
     [[assume(sq < 64)]];
     return priv::PAWN_ATTACKS[color_index(color)][sq];
+}
+
+// Squares in front of a pawn on 'sq' (same and adjacent files) that must be free of enemy pawns.
+constexpr Bitboard passed_pawn_mask(Square sq, Color color)
+{
+    [[assume(sq < 64)]];
+    return priv::PASSED_PAWN_MASKS[color_index(color)][sq];
 }
 
 // Squares strictly between two aligned squares.

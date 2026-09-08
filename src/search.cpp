@@ -886,7 +886,15 @@ Score negamax(
 
             tt_was_tested = true;
             Score se_score = negamax(board, se_depth, ply, se_beta - 1, se_beta, state, tt_move);
-            if (se_score < se_beta) tt_is_singular = true;
+            if (se_score < se_beta)
+            {
+                tt_is_singular = true;
+            }
+            else if (se_beta >= beta)
+            {
+                // Multi-Cut (a non-TT move already beats beta at reduced depth).
+                return beta;
+            }
         }
     }
 
@@ -950,10 +958,27 @@ Score negamax(
         // Futility Pruning.
         if (do_futility_pruning && is_quiet && moves_played > 0 && best_score > -MATE_THRESHOLD) continue;
 
+        bool see_ok = see_ge(board, m, 0);
+        Piece moved_piece = board.pieces[m.get_start_square()];
+        Type moved_type = get_piece_type(moved_piece);
+        Color us = board.side_to_move;
+        Square to = m.get_target_square();
+
         board.make_move(m);
 
-        // Check Extension.
-        i32 extension = board.in_check() ? 1 : 0;
+        i32 extension = 0;
+        // Check extension.
+        if (board.in_check() && see_ok)
+        {
+            extension = Params::check_extension;
+        }
+        // Passed pawn extension.
+        else if (moved_type == Type::PAWN)
+        {
+            u32 rel_rank = (us == Color::WHITE) ? (to / 8) : (7 - (to / 8));
+            if (rel_rank == 6 && board.is_passed_pawn(to, us)) extension = Params::passed_pawn_extension;
+        }
+
         i32 next_double_ext = double_ext;
 
         if (m == tt_move)
@@ -967,7 +992,7 @@ Score negamax(
                 }
                 else if (extension > 0)
                 {
-                    // Double extension if checking and singular.
+                    // Double extension if checking/passed and singular.
                     if (double_ext < Params::se_double_ext_cap && std::abs(static_eval) < Params::se_double_ext_margin)
                     {
                         extension += 1;
@@ -981,6 +1006,8 @@ Score negamax(
                 extension -= Params::se_negative_extension_depth;
             }
         }
+
+        extension = std::clamp(extension, -2, 2);
 
         i32 new_depth = depth - 1 + extension;
 
@@ -1015,7 +1042,7 @@ Score negamax(
                 {
                     // Capture LMR: reduce late or losing captures.
                     R = 1;
-                    if (!see_ge(board, m, 0)) R += 1;
+                    if (!see_ok) R += 1;
                     if (improving) R -= Params::lmr_improving_reduction;
                 }
 

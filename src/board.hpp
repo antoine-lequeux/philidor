@@ -6,6 +6,7 @@
 #include <string_view>
 
 #include "defines.hpp"
+#include "masks.hpp"
 #include "movelist.hpp"
 #include "nnue.hpp"
 #include "zobrist.hpp"
@@ -64,6 +65,10 @@ struct Board
         return pieces[m.get_target_square()] != EMPTY || m.get_flag() == Move::ENPASSANT_CAPTURE_FLAG;
     }
     constexpr bool is_quiet(Move m) const { return !is_capture(m) && !m.is_promotion(); }
+    bool is_passed_pawn(Square sq, Color c) const
+    {
+        return (passed_pawn_mask(sq, c) & piece_bb[bb_index(Type::PAWN, color_index(!c))]) == 0;
+    }
     bool is_draw(i32 search_ply = 0) const;
 
     Bitboard occupied_by(Color color, Bitboard occ = ~0ULL) const;

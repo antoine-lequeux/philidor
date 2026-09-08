@@ -103,6 +103,9 @@ TUNABLE_PARAM(i32, se_double_ext_cap, 3, 1, 5)
 TUNABLE_PARAM(i32, se_negative_extension_depth, 1, 0, 3)
 TUNABLE_PARAM(Score, se_double_ext_margin, 20, 0, 100)
 
+TUNABLE_PARAM(i32, check_extension, 1, 0, 2)
+TUNABLE_PARAM(i32, passed_pawn_extension, 1, 0, 2)
+
 TUNABLE_PARAM(i32, pc_min_depth, 5, 3, 9)
 TUNABLE_PARAM(i32, pc_depth_reduction, 4, 2, 8)
 TUNABLE_PARAM(Score, pc_margin, 200, 100, 400)
